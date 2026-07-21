@@ -3,6 +3,8 @@ import React, { useState } from 'react';
 import AppLayout from '@/components/AppLayout';
 import { Calendar, Search, BarChart3, Download } from 'lucide-react';
 import * as XLSX from 'xlsx';
+import { createClient } from '@/lib/supabase/client';
+import { toast } from 'sonner';
 
 interface SpareBalanceRow {
   spareName: string;
@@ -13,87 +15,68 @@ interface SpareBalanceRow {
   outwardAmount: number;
 }
 
-const STORAGE_KEY_INWARD = 'spareInwardRecords';
-const STORAGE_KEY_DOCKETS = 'serviceDockets';
-const STORAGE_KEY_MASTER = 'masterSetupData';
-
-function getSpareNames(): string[] {
-  try {
-    const stored = localStorage.getItem(STORAGE_KEY_MASTER);
-    if (stored) {
-      const parsed = JSON.parse(stored);
-      return (parsed.spareNames || []).map((s: { value: string }) => s.value);
-    }
-  } catch { }
-  return [];
-}
-
 export default function SpareMasterReportPage() {
   const [fromDate, setFromDate] = useState('');
   const [toDate, setToDate] = useState('');
   const [rows, setRows] = useState<SpareBalanceRow[]>([]);
   const [searched, setSearched] = useState(false);
+  const [loading, setLoading] = useState(false);
 
-  const handleSearch = () => {
-    const spareNames = getSpareNames();
-    const balanceMap: Record<string, SpareBalanceRow> = {};
-
-    // Initialize all spare names
-    spareNames.forEach(name => {
-      balanceMap[name] = { spareName: name, inwardQty: 0, outwardQty: 0, balance: 0, inwardAmount: 0, outwardAmount: 0 };
-    });
-
-    // Process inward records
+  const handleSearch = async () => {
+    setLoading(true);
     try {
-      const inwardStored = localStorage.getItem(STORAGE_KEY_INWARD);
-      if (inwardStored) {
-        const inwards = JSON.parse(inwardStored);
-        inwards.forEach((r: any) => {
-          if (fromDate && r.date < fromDate) return;
-          if (toDate && r.date > toDate) return;
-          (r.items || []).forEach((item: any) => {
-            const name = item.spareName;
-            if (!balanceMap[name]) {
-              balanceMap[name] = { spareName: name, inwardQty: 0, outwardQty: 0, balance: 0, inwardAmount: 0, outwardAmount: 0 };
-            }
-            balanceMap[name].inwardQty += item.qty || 0;
-            balanceMap[name].inwardAmount += item.total || 0;
-          });
-        });
-      }
-    } catch { }
+      const supabase = createClient();
+      const balanceMap: Record<string, SpareBalanceRow> = {};
 
-    // Process outward (from dockets/invoices)
-    try {
-      const docketStored = localStorage.getItem(STORAGE_KEY_DOCKETS);
-      if (docketStored) {
-        const dockets = JSON.parse(docketStored);
-        dockets.forEach((d: any) => {
-          const docketDate = d.dateTime ? d.dateTime.split(' ')[0] : d.date || '';
-          if (fromDate && docketDate < fromDate) return;
-          if (toDate && docketDate > toDate) return;
-          if (d.spares && Array.isArray(d.spares)) {
-            d.spares.forEach((spare: any) => {
-              const name = spare.name || spare.spareName || 'Spare Parts';
-              if (!balanceMap[name]) {
-                balanceMap[name] = { spareName: name, inwardQty: 0, outwardQty: 0, balance: 0, inwardAmount: 0, outwardAmount: 0 };
-              }
-              balanceMap[name].outwardQty += spare.qty || 1;
-              balanceMap[name].outwardAmount += spare.total || spare.amount || 0;
-            });
-          }
-        });
-      }
-    } catch { }
+      // Fetch inward items
+      let inwardQuery = supabase
+        .from('spare_inward_items')
+        .select('spare_name, qty, total, spare_inward(inward_date)');
+      const { data: inwardItems } = await inwardQuery;
 
-    // Calculate balance
-    const result = Object.values(balanceMap).map(row => ({
-      ...row,
-      balance: row.inwardQty - row.outwardQty,
-    })).filter(r => r.inwardQty > 0 || r.outwardQty > 0 || r.balance !== 0);
+      (inwardItems || []).forEach((item: Record<string, unknown>) => {
+        const inward = item.spare_inward as Record<string, unknown> | null;
+        const itemDate = inward?.inward_date ? String(inward.inward_date) : '';
+        if (fromDate && itemDate < fromDate) return;
+        if (toDate && itemDate > toDate) return;
+        const name = String(item.spare_name || '');
+        if (!balanceMap[name]) {
+          balanceMap[name] = { spareName: name, inwardQty: 0, outwardQty: 0, balance: 0, inwardAmount: 0, outwardAmount: 0 };
+        }
+        balanceMap[name].inwardQty += Number(item.qty || 0);
+        balanceMap[name].inwardAmount += Number(item.total || 0);
+      });
 
-    setRows(result);
-    setSearched(true);
+      // Fetch outward from technician allotments (spare_part_amount)
+      const { data: allotments } = await supabase
+        .from('technician_allotments')
+        .select('spare_part_name, spare_part_amount, allotment_date');
+
+      (allotments || []).forEach((a: Record<string, unknown>) => {
+        const aDate = a.allotment_date ? String(a.allotment_date).split('T')[0] : '';
+        if (fromDate && aDate < fromDate) return;
+        if (toDate && aDate > toDate) return;
+        if (!a.spare_part_amount || Number(a.spare_part_amount) === 0) return;
+        const name = String(a.spare_part_name || 'Spare Parts');
+        if (!balanceMap[name]) {
+          balanceMap[name] = { spareName: name, inwardQty: 0, outwardQty: 0, balance: 0, inwardAmount: 0, outwardAmount: 0 };
+        }
+        balanceMap[name].outwardQty += 1;
+        balanceMap[name].outwardAmount += Number(a.spare_part_amount || 0);
+      });
+
+      const result = Object.values(balanceMap).map(row => ({
+        ...row,
+        balance: row.inwardQty - row.outwardQty,
+      })).filter(r => r.inwardQty > 0 || r.outwardQty > 0);
+
+      setRows(result);
+      setSearched(true);
+    } catch (err: unknown) {
+      toast.error(err instanceof Error ? err.message : 'Failed to generate report');
+    } finally {
+      setLoading(false);
+    }
   };
 
   const handleExport = () => {
@@ -143,9 +126,10 @@ export default function SpareMasterReportPage() {
             </div>
             <button
               onClick={handleSearch}
-              className="flex items-center gap-2 px-5 py-2 bg-primary text-primary-foreground rounded-lg text-[13px] font-semibold hover:bg-primary/90 transition-all active:scale-95"
+              disabled={loading}
+              className="flex items-center gap-2 px-5 py-2 bg-primary text-primary-foreground rounded-lg text-[13px] font-semibold hover:bg-primary/90 transition-all active:scale-95 disabled:opacity-60"
             >
-              <Search size={14} /> Generate Report
+              <Search size={14} /> {loading ? 'Generating…' : 'Generate Report'}
             </button>
             {rows.length > 0 && (
               <button
@@ -222,7 +206,7 @@ export default function SpareMasterReportPage() {
           <div className="bg-card rounded-xl shadow-card p-12 text-center">
             <BarChart3 size={48} className="mx-auto text-muted-foreground/30 mb-4" />
             <p className="text-[14px] font-semibold text-muted-foreground">Select a date range and click Generate Report</p>
-            <p className="text-[12px] text-muted-foreground mt-1">Shows Spare Inward, Outward (from invoices) and Balance stock</p>
+            <p className="text-[12px] text-muted-foreground mt-1">Shows Spare Inward, Outward (from allotments) and Balance stock</p>
           </div>
         )}
       </div>
