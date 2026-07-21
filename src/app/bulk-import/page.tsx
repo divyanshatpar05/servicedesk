@@ -29,9 +29,9 @@ const importConfigs: Record<ImportType, ImportConfig> = {
     label: 'Service Dockets',
     icon: <Wrench size={18} />,
     color: 'bg-orange-100 text-orange-700 border-orange-200',
-    requiredColumns: ['Docket No', 'Customer Name', 'Mobile No', 'Model', 'Nature of Docket', 'Status', 'Date'],
+    requiredColumns: ['Docket No', 'Customer Name', 'Mobile No', 'Model', 'Nature of Docket', 'Status', 'Date/Time'],
     sampleData: [
-      { 'Docket No': '100000001', 'Customer Name': 'Priya Sharma', 'Mobile No': '9820145678', 'Model': 'VEGA DLX-60', 'Nature of Docket': 'AMC', 'Status': 'New', 'Date': '2026-07-10' },
+      { 'Docket No': '100000001', 'Customer Name': 'Priya Sharma', 'Mobile No': '9820145678/8390200001', 'Model': 'VEGA DLX-60', 'Nature of Docket': 'AMC', 'Status': 'New', 'Date/Time': '01/01/2026 16:06' },
     ],
   },
   spare_parts: {
@@ -54,6 +54,67 @@ const importConfigs: Record<ImportType, ImportConfig> = {
     ],
   },
 };
+
+// ── Transformation helpers ──────────────────────────────────────────────────
+
+/** Split a mobile string like "9000000001/8390200001/7000000003" into up to 3 parts */
+function splitMobileNumbers(value: string): { mobile1: string; mobile2: string; mobile3: string } {
+  const parts = (value || '').split('/').map(p => p.trim()).filter(Boolean);
+  return {
+    mobile1: parts[0] || '',
+    mobile2: parts[1] || '',
+    mobile3: parts[2] || '',
+  };
+}
+
+/** Split a date-time string like "01/01/2026 16:06" into date and time parts */
+function splitDateTime(value: string): { date: string; time: string } {
+  const str = (value || '').trim();
+  // Try splitting on the first space
+  const spaceIdx = str.indexOf(' ');
+  if (spaceIdx !== -1) {
+    return { date: str.substring(0, spaceIdx).trim(), time: str.substring(spaceIdx + 1).trim() };
+  }
+  return { date: str, time: '' };
+}
+
+/** Apply docket-specific transformations to a raw row, expanding mobile & datetime columns */
+function transformDocketRow(
+  row: Record<string, string>,
+  mapping: Record<string, string>
+): Record<string, string> {
+  const result: Record<string, string> = {};
+
+  // Standard columns (non-transformed)
+  const standardCols = ['Docket No', 'Customer Name', 'Model', 'Nature of Docket', 'Status'];
+  standardCols.forEach(col => {
+    const src = mapping[col];
+    result[col] = src ? (row[src] || '') : '';
+  });
+
+  // Mobile split
+  const mobileSrc = mapping['Mobile No'];
+  const rawMobile = mobileSrc ? (row[mobileSrc] || '') : '';
+  const { mobile1, mobile2, mobile3 } = splitMobileNumbers(rawMobile);
+  result['Mobile 1'] = mobile1;
+  result['Mobile 2'] = mobile2;
+  result['Mobile 3'] = mobile3;
+
+  // Date/Time split
+  const dtSrc = mapping['Date/Time'];
+  const rawDT = dtSrc ? (row[dtSrc] || '') : '';
+  const { date, time } = splitDateTime(rawDT);
+  result['Date'] = date;
+  result['Time'] = time;
+
+  return result;
+}
+
+// ── Derived preview columns for dockets ────────────────────────────────────
+const DOCKET_DISPLAY_COLUMNS = [
+  'Docket No', 'Customer Name', 'Mobile 1', 'Mobile 2', 'Mobile 3',
+  'Model', 'Nature of Docket', 'Status', 'Date', 'Time',
+];
 
 type ImportStep = 'select' | 'upload' | 'map' | 'preview' | 'done';
 
@@ -108,14 +169,30 @@ export default function BulkImportPage() {
     const errors: string[] = [];
     let success = 0;
     uploadedData.forEach((row, idx) => {
-      const missing = config?.requiredColumns.filter(req => {
-        const mapped = columnMapping[req];
-        return !mapped || !row[mapped];
-      });
-      if (missing && missing.length > 0) {
-        errors.push(`Row ${idx + 2}: Missing ${missing.join(', ')}`);
+      if (selectedType === 'dockets') {
+        // For dockets, validate using transformed row
+        const transformed = transformDocketRow(row, columnMapping);
+        const missing: string[] = [];
+        if (!transformed['Docket No']) missing.push('Docket No');
+        if (!transformed['Customer Name']) missing.push('Customer Name');
+        if (!transformed['Mobile 1']) missing.push('Mobile No');
+        if (!transformed['Model']) missing.push('Model');
+        if (!transformed['Date']) missing.push('Date/Time');
+        if (missing.length > 0) {
+          errors.push(`Row ${idx + 2}: Missing ${missing.join(', ')}`);
+        } else {
+          success++;
+        }
       } else {
-        success++;
+        const missing = config?.requiredColumns.filter(req => {
+          const mapped = columnMapping[req];
+          return !mapped || !row[mapped];
+        });
+        if (missing && missing.length > 0) {
+          errors.push(`Row ${idx + 2}: Missing ${missing.join(', ')}`);
+        } else {
+          success++;
+        }
       }
     });
     setImportResult({ success, errors: errors.slice(0, 10) });
@@ -134,6 +211,9 @@ export default function BulkImportPage() {
   };
 
   const mappedPreview = uploadedData.slice(0, 5).map(row => {
+    if (selectedType === 'dockets') {
+      return transformDocketRow(row, columnMapping);
+    }
     const mapped: Record<string, string> = {};
     config?.requiredColumns.forEach(req => {
       const col = columnMapping[req];
@@ -141,6 +221,9 @@ export default function BulkImportPage() {
     });
     return mapped;
   });
+
+  // Columns to show in preview table
+  const previewColumns = selectedType === 'dockets' ? DOCKET_DISPLAY_COLUMNS : (config?.requiredColumns || []);
 
   return (
     <AppLayout title="Bulk Data Import" subtitle="Import customers, dockets, spare parts, and AMC records from Excel/CSV">
@@ -280,11 +363,20 @@ export default function BulkImportPage() {
               <span className="text-[12px] text-muted-foreground">Total: <strong>{uploadedData.length}</strong> rows to import</span>
             </div>
 
+            {selectedType === 'dockets' && (
+              <div className="bg-amber-50 border border-amber-200 rounded-lg px-4 py-3 text-[12px] text-amber-800 flex items-start gap-2">
+                <AlertCircle size={14} className="mt-0.5 flex-shrink-0 text-amber-500" />
+                <span>
+                  <strong>Auto-transformations applied:</strong> Mobile numbers separated by <code className="bg-amber-100 px-1 rounded">/</code> are split into <strong>Mobile 1 / 2 / 3</strong>. Date-time values like <code className="bg-amber-100 px-1 rounded">01/01/2026 16:06</code> are split into separate <strong>Date</strong> and <strong>Time</strong> columns.
+                </span>
+              </div>
+            )}
+
             <div className="overflow-x-auto rounded-lg border border-border">
               <table className="w-full text-[12px]">
                 <thead>
                   <tr className="bg-muted/30 border-b border-border">
-                    {config.requiredColumns.map(col => (
+                    {previewColumns.map(col => (
                       <th key={col} className="px-3 py-2 text-left font-semibold text-muted-foreground whitespace-nowrap">{col}</th>
                     ))}
                   </tr>
@@ -292,7 +384,7 @@ export default function BulkImportPage() {
                 <tbody>
                   {mappedPreview.map((row, i) => (
                     <tr key={i} className={`border-b border-border ${i % 2 === 0 ? 'bg-card' : 'bg-muted/10'}`}>
-                      {config.requiredColumns.map(col => (
+                      {previewColumns.map(col => (
                         <td key={col} className="px-3 py-2 text-foreground whitespace-nowrap">{row[col] || <span className="text-red-400 italic">empty</span>}</td>
                       ))}
                     </tr>
