@@ -1,8 +1,10 @@
 'use client';
-import React, { useState } from 'react';
+import React, { useState, useEffect, useCallback } from 'react';
 import AppLayout from '@/components/AppLayout';
-import { RefreshCw, AlertTriangle, Bell, ChevronLeft, ChevronRight, Search, X, Plus, Edit2, Trash2, Calendar, CheckCircle, Clock, XCircle, Download } from 'lucide-react';
+import { RefreshCw, AlertTriangle, Bell, ChevronLeft, ChevronRight, Search, X, Edit2, Trash2, Calendar, CheckCircle, Clock, XCircle, Download, Loader2 } from 'lucide-react';
 import * as XLSX from 'xlsx';
+import { createClient } from '@/lib/supabase/client';
+import { toast } from 'sonner';
 
 interface AMCEntry {
   id: string;
@@ -28,14 +30,6 @@ interface AMCEntry {
   amcCollectedBy: string;
 }
 
-const mockAMC: AMCEntry[] = [
-  { id: 'amc-001', slNo: 1, customerName: 'Priya Sharma', mobileNo: '9820145678', model: 'VEGA DLX-60', amcType: 'AMC without spare', totalServices: 3, completedServices: 1, lastServiceDate: '2026-07-10', nextServiceDate: '2026-10-10', expiryDate: '2027-07-10', status: 'active', docketNo: '100000001', amcRefNo: '1678', amcStartDate: '2026-07-10', amcAmount: '2000.00', amcDoneBy: 'SWARNALI', collectionMode: 'Cash', assignedTechnician: 'PRITAM SARKAR', serviceDuration: '3 Month Duration', amcCollectedBy: 'SUBHASH DAS' },
-  { id: 'amc-002', slNo: 2, customerName: 'Rajesh Kumar', mobileNo: '9867432109', model: 'HESTIA 90', amcType: 'AMC with spare', totalServices: 3, completedServices: 3, lastServiceDate: '2026-06-15', nextServiceDate: '—', expiryDate: '2026-12-15', status: 'completed', docketNo: '100000002', amcRefNo: '1679', amcStartDate: '2026-01-15', amcAmount: '3000.00', amcDoneBy: 'RAJAN K.', collectionMode: 'Online', assignedTechnician: 'RAJAN K.', serviceDuration: '4 Month Duration', amcCollectedBy: 'DALIA' },
-  { id: 'amc-003', slNo: 3, customerName: 'Meera Nair', mobileNo: '9741238900', model: 'KUTCHINA NOVA', amcType: 'Comprehensive AMC', totalServices: 2, completedServices: 0, lastServiceDate: '—', nextServiceDate: '2026-08-01', expiryDate: '2027-01-01', status: 'upcoming', docketNo: '100000003', amcRefNo: '1680', amcStartDate: '2026-08-01', amcAmount: '1800.00', amcDoneBy: 'ARJUN M.', collectionMode: 'UPI', assignedTechnician: '', serviceDuration: '6 Month Duration', amcCollectedBy: 'SREYA' },
-  { id: 'amc-004', slNo: 4, customerName: 'Suresh Patil', mobileNo: '9823001122', model: 'VEGA DLX-90', amcType: 'AMC without spare', totalServices: 3, completedServices: 2, lastServiceDate: '2026-07-08', nextServiceDate: '2026-10-08', expiryDate: '2027-01-08', status: 'active', docketNo: '100000004', amcRefNo: '1681', amcStartDate: '2026-01-08', amcAmount: '2000.00', amcDoneBy: 'DEEPA V.', collectionMode: 'Cash', assignedTechnician: 'DEEPA V.', serviceDuration: '3 Month Duration', amcCollectedBy: 'DALIA' },
-  { id: 'amc-005', slNo: 5, customerName: 'Kavitha Rao', mobileNo: '9988776655', model: 'HESTIA 60', amcType: 'Non-Comprehensive AMC', totalServices: 4, completedServices: 4, lastServiceDate: '2026-05-20', nextServiceDate: '—', expiryDate: '2026-06-20', status: 'expired', docketNo: '100000005', amcRefNo: '1682', amcStartDate: '2025-06-20', amcAmount: '2500.00', amcDoneBy: 'SUNIL P.', collectionMode: 'Bank Transfer', assignedTechnician: 'SUNIL P.', serviceDuration: '3 Month Duration', amcCollectedBy: 'SREYA' },
-];
-
 const statusConfig: Record<string, { label: string; color: string; icon: React.ReactNode }> = {
   active: { label: 'Active', color: 'bg-green-100 text-green-700', icon: <CheckCircle size={11} /> },
   completed: { label: 'All Done', color: 'bg-blue-100 text-blue-700', icon: <CheckCircle size={11} /> },
@@ -49,8 +43,49 @@ const amcTypeOptions = ['AMC without spare', 'AMC with spare', 'Comprehensive AM
 const collectionModes = ['Cash', 'Online', 'Bank Transfer', 'UPI', 'Cheque'];
 const serviceDurationOptions = ['3 Month Duration', '4 Month Duration', '6 Month Duration'];
 
+function mapRowToAMC(row: Record<string, unknown>, idx: number): AMCEntry {
+  const startDate = row.start_date ? String(row.start_date).split('T')[0] : '';
+  const endDate = row.end_date ? String(row.end_date).split('T')[0] : '';
+  const nextServiceDate = row.next_service_date ? String(row.next_service_date).split('T')[0] : '—';
+
+  const dbStatus = String(row.amc_status || 'ACTIVE').toUpperCase();
+  const statusMap: Record<string, AMCEntry['status']> = {
+    ACTIVE: 'active',
+    COMPLETED: 'completed',
+    EXPIRED: 'expired',
+    PENDING: 'pending',
+  };
+  const status: AMCEntry['status'] = statusMap[dbStatus] || 'active';
+
+  return {
+    id: String(row.id),
+    slNo: idx + 1,
+    customerName: String(row.customer_name || ''),
+    mobileNo: String(row.mobile_number || ''),
+    model: String(row.model || ''),
+    amcType: String(row.amc_type || ''),
+    totalServices: Number(row.total_services || 3),
+    completedServices: Number(row.completed_services || 0),
+    lastServiceDate: '—',
+    nextServiceDate,
+    expiryDate: endDate || '—',
+    status,
+    docketNo: '',
+    amcRefNo: String(row.id || '').slice(0, 8).toUpperCase(),
+    amcStartDate: startDate,
+    amcAmount: '0',
+    amcDoneBy: '',
+    collectionMode: '',
+    assignedTechnician: '',
+    serviceDuration: '',
+    amcCollectedBy: '',
+  };
+}
+
 export default function AMCRenewalPage() {
-  const [amcList, setAmcList] = useState<AMCEntry[]>(mockAMC);
+  const [amcList, setAmcList] = useState<AMCEntry[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
   const [search, setSearch] = useState('');
   const [page, setPage] = useState(1);
   const [perPage] = useState(8);
@@ -77,6 +112,28 @@ export default function AMCRenewalPage() {
   const [editServiceDuration, setEditServiceDuration] = useState('');
   const [editAmcCollectedBy, setEditAmcCollectedBy] = useState('');
   const [editStatus, setEditStatus] = useState<AMCEntry['status']>('active');
+
+  const fetchAMC = useCallback(async () => {
+    setLoading(true);
+    setError(null);
+    try {
+      const supabase = createClient();
+      const { data, error: fetchError } = await supabase
+        .from('amc_renewals')
+        .select('*')
+        .order('created_at', { ascending: false });
+      if (fetchError) throw fetchError;
+      setAmcList((data || []).map((row, idx) => mapRowToAMC(row as Record<string, unknown>, idx)));
+    } catch (err: unknown) {
+      const msg = err instanceof Error ? err.message : 'Failed to load AMC records';
+      setError(msg);
+      toast.error(msg);
+    } finally {
+      setLoading(false);
+    }
+  }, []);
+
+  useEffect(() => { fetchAMC(); }, [fetchAMC]);
 
   const completedAMCs = amcList.filter(a => a.status === 'completed' || a.status === 'expired');
   const upcomingAMCs = amcList.filter(a => a.status === 'upcoming');
@@ -105,7 +162,7 @@ export default function AMCRenewalPage() {
     setEditCompletedServices(String(entry.completedServices));
     setEditLastServiceDate(entry.lastServiceDate === '—' ? '' : entry.lastServiceDate);
     setEditNextServiceDate(entry.nextServiceDate === '—' ? '' : entry.nextServiceDate);
-    setEditExpiryDate(entry.expiryDate);
+    setEditExpiryDate(entry.expiryDate === '—' ? '' : entry.expiryDate);
     setEditAmcStartDate(entry.amcStartDate);
     setEditAmcAmount(entry.amcAmount);
     setEditAmcDoneBy(entry.amcDoneBy);
@@ -117,34 +174,52 @@ export default function AMCRenewalPage() {
     setShowEditModal(true);
   };
 
-  const handleSaveEdit = () => {
+  const handleSaveEdit = async () => {
     if (!editEntry) return;
-    setAmcList(prev => prev.map(a => a.id === editEntry.id ? {
-      ...a,
-      customerName: editCustomerName,
-      mobileNo: editMobile,
-      model: editModel,
-      amcType: editAmcType,
-      totalServices: Number(editTotalServices),
-      completedServices: Number(editCompletedServices),
-      lastServiceDate: editLastServiceDate || '—',
-      nextServiceDate: editNextServiceDate || '—',
-      expiryDate: editExpiryDate,
-      amcStartDate: editAmcStartDate,
-      amcAmount: editAmcAmount,
-      amcDoneBy: editAmcDoneBy,
-      collectionMode: editCollectionMode,
-      assignedTechnician: editAssignedTech,
-      serviceDuration: editServiceDuration,
-      amcCollectedBy: editAmcCollectedBy,
-      status: editStatus,
-    } : a));
-    setShowEditModal(false);
-    setEditEntry(null);
+    const statusMap: Record<string, string> = {
+      active: 'ACTIVE',
+      completed: 'COMPLETED',
+      expired: 'EXPIRED',
+      pending: 'PENDING',
+      upcoming: 'ACTIVE',
+    };
+    try {
+      const supabase = createClient();
+      const { error: updateError } = await supabase
+        .from('amc_renewals')
+        .update({
+          customer_name: editCustomerName,
+          mobile_number: editMobile,
+          model: editModel,
+          amc_type: editAmcType,
+          total_services: Number(editTotalServices),
+          completed_services: Number(editCompletedServices),
+          next_service_date: editNextServiceDate || null,
+          end_date: editExpiryDate || null,
+          start_date: editAmcStartDate || null,
+          amc_status: statusMap[editStatus] || 'ACTIVE',
+        })
+        .eq('id', editEntry.id);
+      if (updateError) throw updateError;
+      toast.success('AMC updated successfully');
+      setShowEditModal(false);
+      setEditEntry(null);
+      fetchAMC();
+    } catch (err: unknown) {
+      toast.error(err instanceof Error ? err.message : 'Update failed');
+    }
   };
 
-  const handleDelete = (id: string) => {
-    setAmcList(prev => prev.filter(a => a.id !== id));
+  const handleDelete = async (id: string) => {
+    try {
+      const supabase = createClient();
+      const { error: delError } = await supabase.from('amc_renewals').delete().eq('id', id);
+      if (delError) throw delError;
+      setAmcList(prev => prev.filter(a => a.id !== id));
+      toast.success('AMC record deleted');
+    } catch (err: unknown) {
+      toast.error(err instanceof Error ? err.message : 'Delete failed');
+    }
   };
 
   const handleExport = () => {
@@ -163,12 +238,6 @@ export default function AMCRenewalPage() {
       'Last Service Date': a.lastServiceDate,
       'Next Service Date': a.nextServiceDate,
       'Status': a.status,
-      'AMC Amount': a.amcAmount,
-      'AMC Done By': a.amcDoneBy,
-      'Collection Mode': a.collectionMode,
-      'Assigned Technician': a.assignedTechnician,
-      'Service Duration': a.serviceDuration,
-      'Collected By': a.amcCollectedBy,
     }));
     const ws = XLSX.utils.json_to_sheet(exportData);
     const wb = XLSX.utils.book_new();
@@ -179,6 +248,29 @@ export default function AMCRenewalPage() {
   const inputCls = "w-full px-2 py-1.5 bg-input border border-border rounded text-[12px] focus:outline-none focus:ring-1 focus:ring-ring focus:border-primary transition-all";
   const selectCls = "w-full px-2 py-1.5 bg-white border border-border rounded text-[12px] focus:outline-none focus:ring-1 focus:ring-ring focus:border-primary transition-all appearance-auto";
   const labelCls = "block text-[11px] font-semibold text-foreground mb-1";
+
+  if (loading) {
+    return (
+      <AppLayout title="AMC Renewal" subtitle="Track Annual Maintenance Contract services and renewal reminders">
+        <div className="bg-card rounded-xl shadow-card p-12 flex flex-col items-center justify-center gap-3">
+          <Loader2 size={32} className="text-primary animate-spin" />
+          <p className="text-[13px] text-muted-foreground">Loading AMC records from database…</p>
+        </div>
+      </AppLayout>
+    );
+  }
+
+  if (error) {
+    return (
+      <AppLayout title="AMC Renewal" subtitle="Track Annual Maintenance Contract services and renewal reminders">
+        <div className="bg-card rounded-xl shadow-card p-12 flex flex-col items-center justify-center gap-3">
+          <AlertTriangle size={32} className="text-danger" />
+          <p className="text-[13px] text-danger font-semibold">{error}</p>
+          <button onClick={fetchAMC} className="px-4 py-2 bg-primary text-primary-foreground rounded-md text-[12px] font-semibold">Retry</button>
+        </div>
+      </AppLayout>
+    );
+  }
 
   return (
     <AppLayout title="AMC Renewal" subtitle="Track Annual Maintenance Contract services and renewal reminders">
@@ -273,13 +365,16 @@ export default function AMCRenewalPage() {
             )}
             <div className="ml-auto flex items-center gap-2">
               <button
+                onClick={fetchAMC}
+                className="flex items-center gap-1.5 px-3 py-1.5 text-[12px] font-medium text-muted-foreground border border-border rounded-md hover:bg-secondary transition-colors"
+              >
+                <Loader2 size={13} className={loading ? 'animate-spin' : ''} /> Refresh
+              </button>
+              <button
                 onClick={handleExport}
                 className="flex items-center gap-1.5 px-3 py-1.5 text-[12px] font-medium text-muted-foreground border border-border rounded-md hover:bg-secondary transition-colors"
               >
                 <Download size={13} /> Export Excel
-              </button>
-              <button className="flex items-center gap-1.5 px-3 py-1.5 bg-primary text-primary-foreground rounded-md text-[12px] font-semibold hover:bg-primary/90 transition-all active:scale-95">
-                <Plus size={13} /> Add AMC
               </button>
             </div>
           </div>
@@ -288,14 +383,16 @@ export default function AMCRenewalPage() {
             <table className="w-full min-w-[1100px]">
               <thead>
                 <tr className="border-b border-border bg-muted/30">
-                  {['Sl No', 'Customer Name', 'Mobile No.', 'Model', 'AMC Type', 'AMC Ref', 'Services', 'Last Service', 'Next Service', 'Expiry Date', 'Technician', 'Status', 'Actions'].map(h => (
+                  {['Sl No', 'Customer Name', 'Mobile No.', 'Model', 'AMC Type', 'AMC Ref', 'Services', 'Next Service', 'Expiry Date', 'Status', 'Actions'].map(h => (
                     <th key={h} className="px-3 py-3 text-left text-[11px] font-semibold uppercase tracking-wider text-muted-foreground whitespace-nowrap">{h}</th>
                   ))}
                 </tr>
               </thead>
               <tbody>
                 {paginated.length === 0 ? (
-                  <tr><td colSpan={13} className="text-center py-12 text-muted-foreground text-[13px]">No AMC records found.</td></tr>
+                  <tr><td colSpan={11} className="text-center py-12 text-muted-foreground text-[13px]">
+                    {amcList.length === 0 ? 'No AMC records found in the database.' : 'No AMC records match your search.'}
+                  </td></tr>
                 ) : (
                   paginated.map((entry, idx) => {
                     const st = statusConfig[entry.status];
@@ -314,7 +411,7 @@ export default function AMCRenewalPage() {
                         <td className="px-3 py-3">
                           <div className="flex items-center gap-2">
                             <div className="flex-1 bg-muted rounded-full h-1.5 w-16">
-                              <div className={`h-1.5 rounded-full ${isComplete ? 'bg-amber-500' : 'bg-green-500'}`} style={{ width: `${(entry.completedServices / entry.totalServices) * 100}%` }} />
+                              <div className={`h-1.5 rounded-full ${isComplete ? 'bg-amber-500' : 'bg-green-500'}`} style={{ width: `${Math.min(100, (entry.completedServices / Math.max(1, entry.totalServices)) * 100)}%` }} />
                             </div>
                             <span className={`text-[11px] font-semibold ${isComplete ? 'text-amber-600' : 'text-foreground'}`}>
                               {entry.completedServices}/{entry.totalServices}
@@ -322,10 +419,8 @@ export default function AMCRenewalPage() {
                             {isComplete && <AlertTriangle size={12} className="text-amber-500" />}
                           </div>
                         </td>
-                        <td className="px-3 py-3 text-[12px] text-foreground whitespace-nowrap">{entry.lastServiceDate}</td>
                         <td className="px-3 py-3 text-[12px] text-foreground whitespace-nowrap">{entry.nextServiceDate}</td>
                         <td className="px-3 py-3 text-[12px] text-foreground whitespace-nowrap">{entry.expiryDate}</td>
-                        <td className="px-3 py-3 text-[12px] text-foreground">{entry.assignedTechnician || <span className="text-muted-foreground italic">Unassigned</span>}</td>
                         <td className="px-3 py-3">
                           <span className={`inline-flex items-center gap-1 text-[11px] font-semibold px-2 py-0.5 rounded-full ${st.color}`}>
                             {st.icon}{st.label}
@@ -381,7 +476,6 @@ export default function AMCRenewalPage() {
               <button onClick={() => setShowEditModal(false)} className="hover:bg-white/20 rounded p-1 transition-colors"><X size={16} /></button>
             </div>
             <div className="p-5 space-y-4">
-              {/* Customer & Product */}
               <div className="grid grid-cols-2 md:grid-cols-3 gap-3">
                 <div>
                   <label className={labelCls}>Customer Name</label>
@@ -396,8 +490,6 @@ export default function AMCRenewalPage() {
                   <input value={editModel} onChange={e => setEditModel(e.target.value)} className={inputCls} />
                 </div>
               </div>
-
-              {/* AMC Details */}
               <div className="grid grid-cols-2 md:grid-cols-3 gap-3">
                 <div>
                   <label className={labelCls}>AMC Type</label>
@@ -406,26 +498,18 @@ export default function AMCRenewalPage() {
                   </select>
                 </div>
                 <div>
-                  <label className={labelCls}>Service Duration</label>
-                  <select value={editServiceDuration} onChange={e => setEditServiceDuration(e.target.value)} className={selectCls}>
-                    {serviceDurationOptions.map(d => <option key={d} value={d}>{d}</option>)}
-                  </select>
+                  <label className={labelCls}>Total Services</label>
+                  <input type="number" value={editTotalServices} onChange={e => setEditTotalServices(e.target.value)} className={inputCls} />
                 </div>
                 <div>
-                  <label className={labelCls}>AMC Amount (₹)</label>
-                  <input type="number" value={editAmcAmount} onChange={e => setEditAmcAmount(e.target.value)} className={inputCls} />
+                  <label className={labelCls}>Completed Services</label>
+                  <input type="number" value={editCompletedServices} onChange={e => setEditCompletedServices(e.target.value)} className={inputCls} />
                 </div>
               </div>
-
-              {/* Dates */}
-              <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
+              <div className="grid grid-cols-2 md:grid-cols-3 gap-3">
                 <div>
                   <label className={labelCls}>AMC Start Date</label>
                   <input type="date" value={editAmcStartDate} onChange={e => setEditAmcStartDate(e.target.value)} className={inputCls} />
-                </div>
-                <div>
-                  <label className={labelCls}>Last Service Date</label>
-                  <input type="date" value={editLastServiceDate} onChange={e => setEditLastServiceDate(e.target.value)} className={inputCls} />
                 </div>
                 <div>
                   <label className={labelCls}>Next Service Date</label>
@@ -436,23 +520,7 @@ export default function AMCRenewalPage() {
                   <input type="date" value={editExpiryDate} onChange={e => setEditExpiryDate(e.target.value)} className={inputCls} />
                 </div>
               </div>
-
-              {/* Services Count */}
-              <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
-                <div>
-                  <label className={labelCls}>Total No. of Services</label>
-                  <input type="number" value={editTotalServices} onChange={e => setEditTotalServices(e.target.value)} className={inputCls} />
-                </div>
-                <div>
-                  <label className={labelCls}>Completed Services</label>
-                  <input type="number" value={editCompletedServices} onChange={e => setEditCompletedServices(e.target.value)} className={inputCls} />
-                </div>
-                <div>
-                  <label className={labelCls}>Collection Mode</label>
-                  <select value={editCollectionMode} onChange={e => setEditCollectionMode(e.target.value)} className={selectCls}>
-                    {collectionModes.map(m => <option key={m} value={m}>{m}</option>)}
-                  </select>
-                </div>
+              <div className="grid grid-cols-2 md:grid-cols-3 gap-3">
                 <div>
                   <label className={labelCls}>Status</label>
                   <select value={editStatus} onChange={e => setEditStatus(e.target.value as AMCEntry['status'])} className={selectCls}>
@@ -463,10 +531,6 @@ export default function AMCRenewalPage() {
                     <option value="pending">Pending</option>
                   </select>
                 </div>
-              </div>
-
-              {/* Personnel */}
-              <div className="grid grid-cols-2 md:grid-cols-3 gap-3">
                 <div>
                   <label className={labelCls}>Assign Technician</label>
                   <select value={editAssignedTech} onChange={e => setEditAssignedTech(e.target.value)} className={selectCls}>
@@ -475,24 +539,12 @@ export default function AMCRenewalPage() {
                   </select>
                 </div>
                 <div>
-                  <label className={labelCls}>AMC Done By</label>
-                  <input value={editAmcDoneBy} onChange={e => setEditAmcDoneBy(e.target.value)} className={inputCls} />
-                </div>
-                <div>
-                  <label className={labelCls}>Collected By</label>
-                  <input value={editAmcCollectedBy} onChange={e => setEditAmcCollectedBy(e.target.value)} className={inputCls} />
+                  <label className={labelCls}>Collection Mode</label>
+                  <select value={editCollectionMode} onChange={e => setEditCollectionMode(e.target.value)} className={selectCls}>
+                    {collectionModes.map(m => <option key={m} value={m}>{m}</option>)}
+                  </select>
                 </div>
               </div>
-
-              {/* AMC Ref (read-only) */}
-              <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
-                <div>
-                  <label className={labelCls}>AMC Ref No. (Auto)</label>
-                  <input value={editEntry.amcRefNo} readOnly className={`${inputCls} bg-gray-100 font-mono font-bold`} />
-                </div>
-              </div>
-
-              {/* Buttons */}
               <div className="flex items-center justify-center gap-4 pt-3 border-t border-border">
                 <button onClick={handleSaveEdit} className="px-8 py-2.5 bg-cyan-500 text-white rounded font-semibold text-[13px] hover:bg-cyan-600 transition-all active:scale-95">
                   SAVE CHANGES

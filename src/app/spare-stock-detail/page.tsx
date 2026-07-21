@@ -1,8 +1,10 @@
 'use client';
-import React, { useState, useEffect } from 'react';
+import React, { useState } from 'react';
 import AppLayout from '@/components/AppLayout';
 import { Calendar, Search, Package2, Download } from 'lucide-react';
 import * as XLSX from 'xlsx';
+import { createClient } from '@/lib/supabase/client';
+import { toast } from 'sonner';
 
 interface StockDetailRow {
   type: 'out' | 'in';
@@ -19,94 +21,78 @@ interface StockDetailRow {
   adjustmentNote?: string;
 }
 
-const STORAGE_KEY_INWARD = 'spareInwardRecords';
-const STORAGE_KEY_DOCKETS = 'serviceDockets';
-
 export default function SpareStockDetailPage() {
   const [fromDate, setFromDate] = useState('');
   const [toDate, setToDate] = useState('');
   const [rows, setRows] = useState<StockDetailRow[]>([]);
   const [searched, setSearched] = useState(false);
   const [filterType, setFilterType] = useState<'all' | 'in' | 'out'>('all');
+  const [loading, setLoading] = useState(false);
 
-  const handleSearch = () => {
-    const result: StockDetailRow[] = [];
-
-    // Outward (from dockets/invoices)
+  const handleSearch = async () => {
+    setLoading(true);
     try {
-      const docketStored = localStorage.getItem(STORAGE_KEY_DOCKETS);
-      if (docketStored) {
-        const dockets = JSON.parse(docketStored);
-        dockets.forEach((d: any) => {
-          const docketDate = d.dateTime ? d.dateTime.split(' ')[0] : d.date || '';
-          if (fromDate && docketDate < fromDate) return;
-          if (toDate && docketDate > toDate) return;
+      const supabase = createClient();
+      const result: StockDetailRow[] = [];
 
-          if (d.spares && Array.isArray(d.spares)) {
-            d.spares.forEach((spare: any) => {
-              result.push({
-                type: 'out',
-                docketNo: d.docketNo || d.id || '',
-                date: docketDate,
-                customerName: d.customerName || '',
-                mobileNo: d.mobileNo || '',
-                spareName: spare.name || spare.spareName || '',
-                qty: spare.qty || 1,
-                rate: spare.rate || 0,
-                amount: spare.total || spare.amount || 0,
-                serviceModel: d.model || '',
-              });
-            });
-          } else if (d.sparePartAmount && d.sparePartAmount > 0) {
-            result.push({
-              type: 'out',
-              docketNo: d.docketNo || d.id || '',
-              date: docketDate,
-              customerName: d.customerName || '',
-              mobileNo: d.mobileNo || '',
-              spareName: 'Spare Parts',
-              qty: 1,
-              rate: d.sparePartAmount,
-              amount: d.sparePartAmount,
-              serviceModel: d.model || '',
-            });
-          }
+      // Outward from technician allotments
+      const { data: allotments } = await supabase
+        .from('technician_allotments')
+        .select('docket_number, allotment_date, customer_name, mobile_number, spare_part_name, spare_part_amount, model');
+
+      (allotments || []).forEach((a: Record<string, unknown>) => {
+        const aDate = a.allotment_date ? String(a.allotment_date).split('T')[0] : '';
+        if (fromDate && aDate < fromDate) return;
+        if (toDate && aDate > toDate) return;
+        if (!a.spare_part_amount || Number(a.spare_part_amount) === 0) return;
+        result.push({
+          type: 'out',
+          docketNo: String(a.docket_number || ''),
+          date: aDate,
+          customerName: String(a.customer_name || ''),
+          mobileNo: String(a.mobile_number || ''),
+          spareName: String(a.spare_part_name || 'Spare Parts'),
+          qty: 1,
+          rate: Number(a.spare_part_amount || 0),
+          amount: Number(a.spare_part_amount || 0),
+          serviceModel: String(a.model || ''),
         });
-      }
-    } catch { }
+      });
 
-    // Inward records
-    try {
-      const inwardStored = localStorage.getItem(STORAGE_KEY_INWARD);
-      if (inwardStored) {
-        const inwards = JSON.parse(inwardStored);
-        inwards.forEach((r: any) => {
-          if (fromDate && r.date < fromDate) return;
-          if (toDate && r.date > toDate) return;
-          (r.items || []).forEach((item: any) => {
-            result.push({
-              type: 'in',
-              docketNo: '',
-              date: r.date,
-              customerName: '',
-              mobileNo: '',
-              spareName: item.spareName || '',
-              qty: item.qty || 0,
-              rate: item.rate || 0,
-              amount: item.total || 0,
-              serviceModel: '',
-              refNo: r.refNo,
-              adjustmentNote: r.adjustmentNote,
-            });
-          });
+      // Inward records
+      const { data: inwardItems } = await supabase
+        .from('spare_inward_items')
+        .select('spare_name, qty, rate, total, spare_inward(ref_no, inward_date, adjustment_note)');
+
+      (inwardItems || []).forEach((item: Record<string, unknown>) => {
+        const inward = item.spare_inward as Record<string, unknown> | null;
+        const itemDate = inward?.inward_date ? String(inward.inward_date) : '';
+        if (fromDate && itemDate < fromDate) return;
+        if (toDate && itemDate > toDate) return;
+        result.push({
+          type: 'in',
+          docketNo: '',
+          date: itemDate,
+          customerName: '',
+          mobileNo: '',
+          spareName: String(item.spare_name || ''),
+          qty: Number(item.qty || 0),
+          rate: Number(item.rate || 0),
+          amount: Number(item.total || 0),
+          serviceModel: '',
+          refNo: inward?.ref_no ? Number(inward.ref_no) : undefined,
+          adjustmentNote: inward?.adjustment_note ? String(inward.adjustment_note) : undefined,
         });
-      }
-    } catch { }
+      });
 
-    // Sort by date desc
-    result.sort((a, b) => b.date.localeCompare(a.date));
-    setRows(result);
-    setSearched(true);
+      result.sort((a, b) => b.date.localeCompare(a.date));
+      setRows(result);
+      setSearched(true);
+    } catch (err: unknown) {
+      toast.error(err instanceof Error ? err.message : 'Failed to load stock detail');
+    } finally {
+      setLoading(false);
+    }
   };
 
   const filteredRows = filterType === 'all' ? rows : rows.filter(r => r.type === filterType);
@@ -176,9 +162,10 @@ export default function SpareStockDetailPage() {
             </div>
             <button
               onClick={handleSearch}
-              className="flex items-center gap-2 px-5 py-2 bg-primary text-primary-foreground rounded-lg text-[13px] font-semibold hover:bg-primary/90 transition-all active:scale-95"
+              disabled={loading}
+              className="flex items-center gap-2 px-5 py-2 bg-primary text-primary-foreground rounded-lg text-[13px] font-semibold hover:bg-primary/90 transition-all active:scale-95 disabled:opacity-60"
             >
-              <Search size={14} /> Search
+              <Search size={14} /> {loading ? 'Searching…' : 'Search'}
             </button>
             {rows.length > 0 && (
               <button
@@ -259,8 +246,8 @@ export default function SpareStockDetailPage() {
         {!searched && (
           <div className="bg-card rounded-xl shadow-card p-12 text-center">
             <Package2 size={48} className="mx-auto text-muted-foreground/30 mb-4" />
-            <p className="text-[14px] font-semibold text-muted-foreground">Select filters and click Search</p>
-            <p className="text-[12px] text-muted-foreground mt-1">Shows complete spare in/out transaction history</p>
+            <p className="text-[14px] font-semibold text-muted-foreground">Select a date range and click Search</p>
+            <p className="text-[12px] text-muted-foreground mt-1">Shows all spare inward and outward transactions</p>
           </div>
         )}
       </div>
