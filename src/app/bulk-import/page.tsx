@@ -58,8 +58,8 @@ const importConfigs: Record<ImportType, ImportConfig> = {
 // ── Transformation helpers ──────────────────────────────────────────────────
 
 /** Split a mobile string like "9000000001/8390200001/7000000003" into up to 3 parts */
-function splitMobileNumbers(value: string): { mobile1: string; mobile2: string; mobile3: string } {
-  const parts = (value || '').split('/').map(p => p.trim()).filter(Boolean);
+function splitMobileNumbers(value: unknown): { mobile1: string; mobile2: string; mobile3: string } {
+  const parts = String(value ?? '').split('/').map(p => p.trim()).filter(Boolean);
   return {
     mobile1: parts[0] || '',
     mobile2: parts[1] || '',
@@ -68,8 +68,8 @@ function splitMobileNumbers(value: string): { mobile1: string; mobile2: string; 
 }
 
 /** Split a date-time string like "01/01/2026 16:06" into date and time parts */
-function splitDateTime(value: string): { date: string; time: string } {
-  const str = (value || '').trim();
+function splitDateTime(value: unknown): { date: string; time: string } {
+  const str = String(value ?? '').trim();
   // Try splitting on the first space
   const spaceIdx = str.indexOf(' ');
   if (spaceIdx !== -1) {
