@@ -69,6 +69,23 @@ function splitMobileNumbers(value: unknown): { mobile1: string; mobile2: string;
 
 function splitDateTime(value: unknown): { date: string; time: string } {
   const str = String(value ?? '').trim();
+
+  // Detect Excel serial number: a number like 46054.51261574074
+  // Excel serial dates: integers 1-2958465 (year 1900 to 9999)
+  const excelSerial = Number(str);
+  if (!isNaN(excelSerial) && excelSerial > 1 && excelSerial < 2958466 && /^\d+(\.\d+)?$/.test(str)) {
+    // Excel epoch is Dec 30, 1899 (accounting for Excel's leap year bug)
+    const excelEpoch = new Date(1899, 11, 30); // Dec 30, 1899
+    const totalMs = excelEpoch.getTime() + excelSerial * 86400000;
+    const d = new Date(totalMs);
+    const day = String(d.getDate()).padStart(2, '0');
+    const month = String(d.getMonth() + 1).padStart(2, '0');
+    const year = d.getFullYear();
+    const hours = String(d.getHours()).padStart(2, '0');
+    const minutes = String(d.getMinutes()).padStart(2, '0');
+    return { date: `${day}/${month}/${year}`, time: `${hours}:${minutes}` };
+  }
+
   const spaceIdx = str.indexOf(' ');
   if (spaceIdx !== -1) {
     return { date: str.substring(0, spaceIdx).trim(), time: str.substring(spaceIdx + 1).trim() };
@@ -104,6 +121,18 @@ function parseDate(dateStr: string): string | null {
   }
   // Already ISO
   if (/^\d{4}-\d{2}-\d{2}/.test(dateStr)) return dateStr;
+  // Handle Excel serial numbers
+  const excelSerial = Number(dateStr);
+  if (!isNaN(excelSerial) && excelSerial > 1 && excelSerial < 2958466 && /^\d+(\.\d+)?$/.test(dateStr)) {
+    // Excel epoch is Dec 30, 1899 (accounting for Excel's leap year bug)
+    const excelEpoch = new Date(1899, 11, 30); // Dec 30, 1899
+    const totalMs = excelEpoch.getTime() + excelSerial * 86400000;
+    const d = new Date(totalMs);
+    const day = String(d.getDate()).padStart(2, '0');
+    const month = String(d.getMonth() + 1).padStart(2, '0');
+    const year = d.getFullYear();
+    return `${year}-${month}-${day}`;
+  }
   return null;
 }
 
