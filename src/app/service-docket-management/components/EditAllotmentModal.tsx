@@ -55,9 +55,10 @@ interface ServiceDateRow {
 
 interface EditAllotmentModalProps {
   open: boolean;
-  docket: Docket;
+  entry: Docket;
   onClose: () => void;
-  onPrint: (docket: Docket) => void;
+  onSave: () => void;
+  onPrint?: (docket: Docket) => void;
 }
 
 const serviceEngineers = ['PRITAM SARKAR', 'RAJAN K.', 'ARJUN M.', 'DEEPA V.', 'SUNIL P.', 'PRIYA S.', 'KAVITHA R.'];
@@ -251,7 +252,7 @@ function saveSpareAdjustmentAsInward(spareName: string, rate: number) {
   } catch { }
 }
 
-export default function EditAllotmentModal({ open, docket, onClose, onPrint }: EditAllotmentModalProps) {
+export default function EditAllotmentModal({ open, entry: docket, onClose, onSave, onPrint }: EditAllotmentModalProps) {
   const [serviceEngineer, setServiceEngineer] = useState(docket.serviceEngineer || '');
   const [serviceMode, setServiceMode] = useState(docket.natureOfDocket || '');
   const [selectedService, setSelectedService] = useState(docket.paymentType || '');
@@ -382,7 +383,7 @@ export default function EditAllotmentModal({ open, docket, onClose, onPrint }: E
     setTimeout(() => {
       setSaving(false);
       toast.success('Allotment entry updated successfully!');
-      onClose();
+      onSave();
     }, 1000);
   };
 
