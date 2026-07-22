@@ -20,10 +20,58 @@ const importConfigs: Record<ImportType, ImportConfig> = {
     label: 'Customers',
     icon: <Users size={18} />,
     color: 'bg-blue-100 text-blue-700 border-blue-200',
-    requiredColumns: ['Customer Name', 'Mobile No', 'Address', 'Pincode', 'Area', 'Email'],
+    requiredColumns: [
+      'SL. NO', 'DATE', 'CARD NO', 'CUSTOMER NAME', 'DETAILS ADDRESS',
+      'ZIP CODE', 'CONTACT NO', 'SALE POINT', 'INVOICE NO', 'SERIAL NO PRODUCT',
+      'INSTALL DATE', 'INST. MONTH', 'EXP DATE', 'INSTALLER',
+      'CUR. SERV.', 'TOTAL SERVICE', 'NO OF SERVICE', 'NEXT SERVICE',
+      'OFFICE ATTENDED BY', 'AMC',
+    ],
     sampleData: [
-      { 'Customer Name': 'Priya Sharma', 'Mobile No': '9820145678', 'Address': '47 D.N.C RD KOL', 'Pincode': '700035', 'Area': 'Bandra West', 'Email': 'priya@example.com' },
-      { 'Customer Name': 'Rajesh Kumar', 'Mobile No': '9867432109', 'Address': '12 Park Street KOL', 'Pincode': '700016', 'Area': 'Park Street', 'Email': 'rajesh@example.com' },
+      {
+        'SL. NO': '1',
+        'DATE': '01/01/2026',
+        'CARD NO': 'CARD-001',
+        'CUSTOMER NAME': 'Priya Sharma',
+        'DETAILS ADDRESS': '47 D.N.C RD KOL',
+        'ZIP CODE': '700035',
+        'CONTACT NO': '9820145678',
+        'SALE POINT': 'Bandra West',
+        'INVOICE NO': 'INV-2026-001',
+        'SERIAL NO PRODUCT': 'SN-001234',
+        'INSTALL DATE': '05/01/2026',
+        'INST. MONTH': 'January',
+        'EXP DATE': '05/01/2027',
+        'INSTALLER': 'Ramesh Kumar',
+        'CUR. SERV.': '1',
+        'TOTAL SERVICE': '4',
+        'NO OF SERVICE': '1',
+        'NEXT SERVICE': '05/04/2026',
+        'OFFICE ATTENDED BY': 'Suresh',
+        'AMC': 'YES',
+      },
+      {
+        'SL. NO': '2',
+        'DATE': '02/01/2026',
+        'CARD NO': 'CARD-002',
+        'CUSTOMER NAME': 'Rajesh Kumar',
+        'DETAILS ADDRESS': '12 Park Street KOL',
+        'ZIP CODE': '700016',
+        'CONTACT NO': '9867432109',
+        'SALE POINT': 'Park Street',
+        'INVOICE NO': 'INV-2026-002',
+        'SERIAL NO PRODUCT': 'SN-005678',
+        'INSTALL DATE': '06/01/2026',
+        'INST. MONTH': 'January',
+        'EXP DATE': '06/01/2027',
+        'INSTALLER': 'Anil Verma',
+        'CUR. SERV.': '2',
+        'TOTAL SERVICE': '4',
+        'NO OF SERVICE': '2',
+        'NEXT SERVICE': '06/04/2026',
+        'OFFICE ATTENDED BY': 'Mohan',
+        'AMC': 'NO',
+      },
     ],
   },
   dockets: {
@@ -282,19 +330,38 @@ export default function BulkImportPage() {
             const src = columnMapping[col];
             return src ? String(row[src] ?? '').trim() : '';
           };
-          const name = get('Customer Name');
-          const mobile = get('Mobile No');
-          if (!name || !mobile) {
-            errors.push(`Row ${idx + 2}: Missing Customer Name or Mobile No`);
+          const name = get('CUSTOMER NAME');
+          const contact = get('CONTACT NO');
+          if (!name) {
+            errors.push(`Row ${idx + 2}: Missing CUSTOMER NAME`);
             return;
           }
+          const installDateIso = parseDate(get('INSTALL DATE'));
+          const expDateIso = parseDate(get('EXP DATE'));
+          const nextServiceIso = parseDate(get('NEXT SERVICE'));
+          const dateIso = parseDate(get('DATE'));
           toInsert.push({
             user_id: userId,
             customer_name: name,
-            mobile_number: mobile,
-            address: get('Address') || null,
-            zipcode: get('Pincode') || null,
-            area: get('Area') || null,
+            mobile_number: contact || null,
+            address: get('DETAILS ADDRESS') || null,
+            zipcode: get('ZIP CODE') || null,
+            area: get('SALE POINT') || null,
+            card_no: get('CARD NO') || null,
+            invoice_no: get('INVOICE NO') || null,
+            serial_no_product: get('SERIAL NO PRODUCT') || null,
+            install_date: installDateIso || null,
+            inst_month: get('INST. MONTH') || null,
+            exp_date: expDateIso || null,
+            installer: get('INSTALLER') || null,
+            cur_serv: get('CUR. SERV.') || null,
+            total_service: get('TOTAL SERVICE') || null,
+            no_of_service: get('NO OF SERVICE') || null,
+            next_service: nextServiceIso || null,
+            office_attended_by: get('OFFICE ATTENDED BY') || null,
+            amc: get('AMC') || null,
+            sl_no: get('SL. NO') || null,
+            entry_date: dateIso || null,
           });
         });
 
