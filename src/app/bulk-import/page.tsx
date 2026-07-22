@@ -35,7 +35,7 @@ const importConfigs: Record<ImportType, ImportConfig> = {
         'CUSTOMER NAME': 'Priya Sharma',
         'DETAILS ADDRESS': '47 D.N.C RD KOL',
         'ZIP CODE': '700035',
-        'CONTACT NO': '9820145678',
+        'CONTACT NO': '9820145678/8390200001',
         'SALE POINT': 'Bandra West',
         'INVOICE NO': 'INV-2026-001',
         'SERIAL NO PRODUCT': 'SN-001234',
@@ -114,6 +114,59 @@ function splitMobileNumbers(value: unknown): { mobile1: string; mobile2: string;
     mobile3: parts[2] || '',
   };
 }
+
+/** Auto-convert short pincodes to full Kolkata pincodes.
+ *  e.g. 14 → 700014, 106 → 700106, 700014 → 700014 (unchanged) */
+function normalizeKolkataPincode(value: unknown): string {
+  const str = String(value ?? '').trim();
+  if (!str) return '';
+  // Already a full 6-digit pincode starting with 700
+  if (/^700\d{3}$/.test(str)) return str;
+  // Short pincode (1-3 digits) — pad to 3 digits then prefix 700
+  if (/^\d{1,3}$/.test(str)) {
+    return '700' + str.padStart(3, '0');
+  }
+  // Any other 6-digit pincode — return as-is
+  return str;
+}
+
+/** Transform a customer row: split CONTACT NO and normalize ZIP CODE */
+function transformCustomerRow(
+  row: Record<string, string>,
+  mapping: Record<string, string>
+): Record<string, string> {
+  const get = (col: string) => {
+    const src = mapping[col];
+    return src ? String(row[src] ?? '').trim() : '';
+  };
+  const contactRaw = get('CONTACT NO');
+  const { mobile1, mobile2, mobile3 } = splitMobileNumbers(contactRaw);
+  const result: Record<string, string> = {};
+  // Copy all standard columns
+  [
+    'SL. NO', 'DATE', 'CARD NO', 'CUSTOMER NAME', 'DETAILS ADDRESS',
+    'SALE POINT', 'INVOICE NO', 'SERIAL NO PRODUCT',
+    'INSTALL DATE', 'INST. MONTH', 'EXP DATE', 'INSTALLER',
+    'CUR. SERV.', 'TOTAL SERVICE', 'NO OF SERVICE', 'NEXT SERVICE',
+    'OFFICE ATTENDED BY', 'AMC',
+  ].forEach(col => { result[col] = get(col); });
+  // Normalized pincode
+  result['ZIP CODE'] = normalizeKolkataPincode(get('ZIP CODE'));
+  // Split contact numbers
+  result['CONTACT NUMBER 1'] = mobile1;
+  result['CONTACT NUMBER 2'] = mobile2;
+  result['CONTACT NUMBER 3'] = mobile3;
+  return result;
+}
+
+const CUSTOMER_DISPLAY_COLUMNS = [
+  'SL. NO', 'DATE', 'CARD NO', 'CUSTOMER NAME', 'DETAILS ADDRESS',
+  'ZIP CODE', 'CONTACT NUMBER 1', 'CONTACT NUMBER 2', 'CONTACT NUMBER 3',
+  'SALE POINT', 'INVOICE NO', 'SERIAL NO PRODUCT',
+  'INSTALL DATE', 'INST. MONTH', 'EXP DATE', 'INSTALLER',
+  'CUR. SERV.', 'TOTAL SERVICE', 'NO OF SERVICE', 'NEXT SERVICE',
+  'OFFICE ATTENDED BY', 'AMC',
+];
 
 function splitDateTime(value: unknown): { date: string; time: string } {
   const str = String(value ?? '').trim();
@@ -326,41 +379,39 @@ export default function BulkImportPage() {
         const toInsert: Record<string, unknown>[] = [];
 
         uploadedData.forEach((row, idx) => {
-          const get = (col: string) => {
-            const src = columnMapping[col];
-            return src ? String(row[src] ?? '').trim() : '';
-          };
-          const name = get('CUSTOMER NAME');
-          const contact = get('CONTACT NO');
+          const transformed = transformCustomerRow(row, columnMapping);
+          const name = transformed['CUSTOMER NAME'];
           if (!name) {
             errors.push(`Row ${idx + 2}: Missing CUSTOMER NAME`);
             return;
           }
-          const installDateIso = parseDate(get('INSTALL DATE'));
-          const expDateIso = parseDate(get('EXP DATE'));
-          const nextServiceIso = parseDate(get('NEXT SERVICE'));
-          const dateIso = parseDate(get('DATE'));
+          const installDateIso = parseDate(transformed['INSTALL DATE']);
+          const expDateIso = parseDate(transformed['EXP DATE']);
+          const nextServiceIso = parseDate(transformed['NEXT SERVICE']);
+          const dateIso = parseDate(transformed['DATE']);
           toInsert.push({
             user_id: userId,
             customer_name: name,
-            mobile_number: contact || null,
-            address: get('DETAILS ADDRESS') || null,
-            zipcode: get('ZIP CODE') || null,
-            area: get('SALE POINT') || null,
-            card_no: get('CARD NO') || null,
-            invoice_no: get('INVOICE NO') || null,
-            serial_no_product: get('SERIAL NO PRODUCT') || null,
+            mobile_number: transformed['CONTACT NUMBER 1'] || null,
+            alternate_mobile: transformed['CONTACT NUMBER 2'] || null,
+            mobile_number_3: transformed['CONTACT NUMBER 3'] || null,
+            address: transformed['DETAILS ADDRESS'] || null,
+            zipcode: transformed['ZIP CODE'] || null,
+            area: transformed['SALE POINT'] || null,
+            card_no: transformed['CARD NO'] || null,
+            invoice_no: transformed['INVOICE NO'] || null,
+            serial_no_product: transformed['SERIAL NO PRODUCT'] || null,
             install_date: installDateIso || null,
-            inst_month: get('INST. MONTH') || null,
+            inst_month: transformed['INST. MONTH'] || null,
             exp_date: expDateIso || null,
-            installer: get('INSTALLER') || null,
-            cur_serv: get('CUR. SERV.') || null,
-            total_service: get('TOTAL SERVICE') || null,
-            no_of_service: get('NO OF SERVICE') || null,
+            installer: transformed['INSTALLER'] || null,
+            cur_serv: transformed['CUR. SERV.'] || null,
+            total_service: transformed['TOTAL SERVICE'] || null,
+            no_of_service: transformed['NO OF SERVICE'] || null,
             next_service: nextServiceIso || null,
-            office_attended_by: get('OFFICE ATTENDED BY') || null,
-            amc: get('AMC') || null,
-            sl_no: get('SL. NO') || null,
+            office_attended_by: transformed['OFFICE ATTENDED BY'] || null,
+            amc: transformed['AMC'] || null,
+            sl_no: transformed['SL. NO'] || null,
             entry_date: dateIso || null,
           });
         });
@@ -476,6 +527,9 @@ export default function BulkImportPage() {
     if (selectedType === 'dockets') {
       return transformDocketRow(row, columnMapping);
     }
+    if (selectedType === 'customers') {
+      return transformCustomerRow(row, columnMapping);
+    }
     const mapped: Record<string, string> = {};
     config?.requiredColumns.forEach(req => {
       const col = columnMapping[req];
@@ -484,7 +538,11 @@ export default function BulkImportPage() {
     return mapped;
   });
 
-  const previewColumns = selectedType === 'dockets' ? DOCKET_DISPLAY_COLUMNS : (config?.requiredColumns || []);
+  const previewColumns = selectedType === 'dockets'
+    ? DOCKET_DISPLAY_COLUMNS
+    : selectedType === 'customers'
+      ? CUSTOMER_DISPLAY_COLUMNS
+      : (config?.requiredColumns || []);
 
   return (
     <AppLayout title="Bulk Data Import" subtitle="Import customers, dockets, spare parts, and AMC records from Excel/CSV">
@@ -629,6 +687,15 @@ export default function BulkImportPage() {
                 <AlertCircle size={14} className="mt-0.5 flex-shrink-0 text-amber-500" />
                 <span>
                   <strong>Auto-transformations applied:</strong> Mobile numbers separated by <code className="bg-amber-100 px-1 rounded">/</code> are split into <strong>Mobile 1 / 2 / 3</strong>. Date-time values like <code className="bg-amber-100 px-1 rounded">01/01/2026 16:06</code> are split into separate <strong>Date</strong> and <strong>Time</strong> columns.
+                </span>
+              </div>
+            )}
+
+            {selectedType === 'customers' && (
+              <div className="bg-amber-50 border border-amber-200 rounded-lg px-4 py-3 text-[12px] text-amber-800 flex items-start gap-2">
+                <AlertCircle size={14} className="mt-0.5 flex-shrink-0 text-amber-500" />
+                <span>
+                  <strong>Auto-transformations applied:</strong> Contact numbers separated by <code className="bg-amber-100 px-1 rounded">/</code> are split into <strong>Contact Number 1 / 2 / 3</strong>. Short pincodes like <code className="bg-amber-100 px-1 rounded">14</code> are auto-expanded to full Kolkata pincodes (e.g. <strong>700014</strong>).
                 </span>
               </div>
             )}
