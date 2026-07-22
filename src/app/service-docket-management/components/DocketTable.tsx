@@ -646,7 +646,7 @@ export default function DocketTable({ onCreateDocket }: DocketTableProps) {
       {printingDocket && (
         <PrintInvoiceModal
           open={!!printingDocket}
-          entry={printingDocket as unknown as Parameters<typeof PrintInvoiceModal>[0]['entry']}
+          docket={printingDocket as unknown as Parameters<typeof PrintInvoiceModal>[0]['docket']}
           onClose={() => setPrintingDocket(null)}
         />
       )}
