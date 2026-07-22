@@ -24,6 +24,7 @@ const navGroups: { group: string; items: NavItem[]; adminOnly?: boolean; technic
     items: [
       { id: 'nav-dashboard', label: 'Dashboard', icon: <LayoutDashboard size={18} />, href: '/', adminOnly: false, userHidden: true },
       { id: 'nav-dockets', label: 'Service Dockets', icon: <FileText size={18} />, href: '/service-docket-management', badge: 7 },
+      { id: 'nav-notifications', label: 'Notifications', icon: <Bell size={18} />, href: '/notifications' },
       { id: 'nav-technician', label: 'Technician Allotment', icon: <Wrench size={18} />, href: '/technician-allotment' },
       { id: 'nav-visits', label: 'Technician Visits', icon: <Truck size={18} />, href: '#' },
       { id: 'nav-geotag', label: 'Geo Tracking Live', icon: <MapPin size={18} />, href: '/geo-tracking' },

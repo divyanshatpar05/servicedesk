@@ -3,7 +3,7 @@ import React, { useState, useMemo, useEffect, useCallback } from 'react';
 import { toast } from 'sonner';
 import * as XLSX from 'xlsx';
 import StatusBadge, { DocketStatus } from '@/components/ui/StatusBadge';
-import { Search, ChevronUp, ChevronDown, ChevronLeft, ChevronRight, AlertTriangle, X, Download, Settings2, MessageCircle, Loader2 } from 'lucide-react';
+import { Search, ChevronUp, ChevronDown, ChevronLeft, ChevronRight, AlertTriangle, X, Download, Settings2, MessageCircle, Loader2, Filter, SlidersHorizontal } from 'lucide-react';
 import EditAllotmentModal from './EditAllotmentModal';
 import PrintInvoiceModal from './PrintInvoiceModal';
 import WhatsAppSharePanel from './WhatsAppSharePanel';
@@ -19,6 +19,7 @@ interface Docket {
   model: string;
   natureOfDocket: string;
   status: DocketStatus;
+  priority: 'High' | 'Medium' | 'Low' | '';
   isOverdue: boolean;
   cardNo: string;
   cardDetail: string;
@@ -39,6 +40,7 @@ interface Docket {
 
 const statusOptions: DocketStatus[] = ['New', 'Assigned', 'Visited', 'Diagnosed', 'In-Repair', 'Completed', 'Invoiced', 'Closed', 'Cancelled'];
 const filterStatuses: (DocketStatus | 'All' | 'Overdue')[] = ['All', 'New', 'Assigned', 'Visited', 'In-Repair', 'Completed', 'Overdue', 'Closed'];
+const priorityOptions = ['All', 'High', 'Medium', 'Low'] as const;
 
 interface DocketTableProps {
   onCreateDocket: () => void;
@@ -48,11 +50,9 @@ type SortKey = keyof Docket;
 
 function mapDbRowToDocket(row: Record<string, unknown>, idx: number): Docket {
   const createdAt = row.created_at ? String(row.created_at) : '';
-  // Parse ISO date and format as DD/MM/YYYY HH:MM to match imported data format
   let dateTime = '';
   if (createdAt) {
-    // Extract date and time parts from ISO string (ignore timezone, use as-is)
-    const isoStr = createdAt.replace('T', ' ').slice(0, 16); // "YYYY-MM-DD HH:MM"
+    const isoStr = createdAt.replace('T', ' ').slice(0, 16);
     const [datePart, timePart] = isoStr.split(' ');
     if (datePart) {
       const [year, month, day] = datePart.split('-');
@@ -60,7 +60,6 @@ function mapDbRowToDocket(row: Record<string, unknown>, idx: number): Docket {
     }
   }
   const status = (row.docket_status as string) || 'New';
-  // Map DB status values to UI status values
   const statusMap: Record<string, DocketStatus> = {
     RUNNING: 'In-Repair',
     COMPLETED: 'Completed',
@@ -68,6 +67,10 @@ function mapDbRowToDocket(row: Record<string, unknown>, idx: number): Docket {
     CANCELLED: 'Cancelled',
   };
   const uiStatus: DocketStatus = (statusMap[status] as DocketStatus) || (status as DocketStatus) || 'New';
+
+  // Derive priority from DB or default
+  const dbPriority = (row.priority as string) || '';
+  const priority: Docket['priority'] = (['High', 'Medium', 'Low'].includes(dbPriority) ? dbPriority : '') as Docket['priority'];
 
   return {
     id: String(row.id),
@@ -79,6 +82,7 @@ function mapDbRowToDocket(row: Record<string, unknown>, idx: number): Docket {
     model: String(row.model_no || ''),
     natureOfDocket: String(row.nature_of_docket || ''),
     status: uiStatus,
+    priority,
     isOverdue: false,
     cardNo: String(row.card_no || ''),
     cardDetail: String(row.card_detail || ''),
@@ -94,8 +98,19 @@ function mapDbRowToDocket(row: Record<string, unknown>, idx: number): Docket {
     totalAmount: 0,
     paymentMode: '',
     sparePartAmount: 0,
-    serviceEngineer: '',
+    serviceEngineer: String(row.service_engineer || ''),
   };
+}
+
+// Parse DD/MM/YYYY from dateTime string
+function parseDocketDate(dateTime: string): Date | null {
+  if (!dateTime) return null;
+  const datePart = dateTime.split(' ')[0];
+  const parts = datePart.split('/');
+  if (parts.length !== 3) return null;
+  const [day, month, year] = parts;
+  let d = new Date(`${year}-${month}-${day}`);
+  return isNaN(d.getTime()) ? null : d;
 }
 
 export default function DocketTable({ onCreateDocket }: DocketTableProps) {
@@ -112,6 +127,31 @@ export default function DocketTable({ onCreateDocket }: DocketTableProps) {
   const [printingDocket, setPrintingDocket] = useState<Docket | null>(null);
   const [deletingIds, setDeletingIds] = useState<Set<string>>(new Set());
   const [whatsappDocket, setWhatsappDocket] = useState<Docket | null>(null);
+
+  // Advanced filter state
+  const [showFilters, setShowFilters] = useState(false);
+  const [dateFrom, setDateFrom] = useState('');
+  const [dateTo, setDateTo] = useState('');
+  const [filterTechnician, setFilterTechnician] = useState('');
+  const [filterPriority, setFilterPriority] = useState<string>('All');
+
+  const activeFilterCount = [
+    dateFrom ? 1 : 0,
+    dateTo ? 1 : 0,
+    filterTechnician ? 1 : 0,
+    filterPriority !== 'All' ? 1 : 0,
+    filterStatus !== 'All' ? 1 : 0,
+  ].reduce((a, b) => a + b, 0);
+
+  const clearAllFilters = () => {
+    setDateFrom('');
+    setDateTo('');
+    setFilterTechnician('');
+    setFilterPriority('All');
+    setFilterStatus('All');
+    setSearch('');
+    setPage(1);
+  };
 
   const fetchDockets = useCallback(async () => {
     setLoading(true);
@@ -139,6 +179,12 @@ export default function DocketTable({ onCreateDocket }: DocketTableProps) {
     fetchDockets();
   }, [fetchDockets]);
 
+  // Unique technicians for autocomplete
+  const technicianOptions = useMemo(() => {
+    const set = new Set(dockets.map(d => d.serviceEngineer).filter(Boolean));
+    return Array.from(set).sort();
+  }, [dockets]);
+
   const filtered = useMemo(() => {
     let d = [...dockets];
     if (search) {
@@ -153,13 +199,37 @@ export default function DocketTable({ onCreateDocket }: DocketTableProps) {
     }
     if (filterStatus === 'Overdue') d = d.filter(x => x.isOverdue);
     else if (filterStatus !== 'All') d = d.filter(x => x.status === filterStatus);
+
+    if (filterPriority !== 'All') d = d.filter(x => x.priority === filterPriority);
+
+    if (filterTechnician.trim()) {
+      const q = filterTechnician.trim().toLowerCase();
+      d = d.filter(x => x.serviceEngineer.toLowerCase().includes(q));
+    }
+
+    if (dateFrom) {
+      const from = new Date(dateFrom);
+      d = d.filter(x => {
+        const dt = parseDocketDate(x.dateTime);
+        return dt ? dt >= from : true;
+      });
+    }
+    if (dateTo) {
+      const to = new Date(dateTo);
+      to.setHours(23, 59, 59, 999);
+      d = d.filter(x => {
+        const dt = parseDocketDate(x.dateTime);
+        return dt ? dt <= to : true;
+      });
+    }
+
     d.sort((a, b) => {
       const av = String(a[sortKey]);
       const bv = String(b[sortKey]);
       return sortDir === 'asc' ? av.localeCompare(bv) : bv.localeCompare(av);
     });
     return d;
-  }, [dockets, search, filterStatus, sortKey, sortDir]);
+  }, [dockets, search, filterStatus, filterPriority, filterTechnician, dateFrom, dateTo, sortKey, sortDir]);
 
   const totalPages = Math.ceil(filtered.length / perPage);
   const paginated = filtered.slice((page - 1) * perPage, page * perPage);
@@ -195,6 +265,7 @@ export default function DocketTable({ onCreateDocket }: DocketTableProps) {
       'Model': d.model,
       'Nature of Docket': d.natureOfDocket,
       'Status': d.status,
+      'Priority': d.priority,
       'Overdue': d.isOverdue ? 'Yes' : 'No',
       'Card No': d.cardNo,
       'Customer Address': d.customerAddress,
@@ -216,6 +287,12 @@ export default function DocketTable({ onCreateDocket }: DocketTableProps) {
   const SortIcon = ({ col }: { col: SortKey }) => {
     if (sortKey !== col) return <ChevronUp size={11} className="opacity-30" />;
     return sortDir === 'asc' ? <ChevronUp size={11} className="text-primary" /> : <ChevronDown size={11} className="text-primary" />;
+  };
+
+  const priorityColorMap: Record<string, string> = {
+    High: 'bg-danger/10 text-danger border-danger/30',
+    Medium: 'bg-warning/10 text-warning border-warning/30',
+    Low: 'bg-success/10 text-success border-success/30',
   };
 
   if (loading) {
@@ -257,6 +334,7 @@ export default function DocketTable({ onCreateDocket }: DocketTableProps) {
           )}
         </div>
 
+        {/* Status chips */}
         <div className="flex items-center gap-1.5 flex-wrap">
           {filterStatuses.map(s => (
             <button
@@ -274,6 +352,22 @@ export default function DocketTable({ onCreateDocket }: DocketTableProps) {
         </div>
 
         <div className="ml-auto flex items-center gap-2">
+          {/* Advanced filter toggle */}
+          <button
+            onClick={() => setShowFilters(v => !v)}
+            className={`relative flex items-center gap-1.5 px-3 py-1.5 text-[12px] font-medium border rounded-md transition-colors ${
+              showFilters || activeFilterCount > 0
+                ? 'bg-primary/10 text-primary border-primary/30' :'text-muted-foreground border-border hover:bg-secondary'
+            }`}
+          >
+            <SlidersHorizontal size={13} />
+            Filters
+            {activeFilterCount > 0 && (
+              <span className="absolute -top-1.5 -right-1.5 w-4 h-4 bg-primary text-primary-foreground rounded-full text-[9px] font-bold flex items-center justify-center">
+                {activeFilterCount}
+              </span>
+            )}
+          </button>
           <button
             onClick={fetchDockets}
             className="flex items-center gap-1.5 px-3 py-1.5 text-[12px] font-medium text-muted-foreground border border-border rounded-md hover:bg-secondary transition-colors"
@@ -297,6 +391,92 @@ export default function DocketTable({ onCreateDocket }: DocketTableProps) {
         </div>
       </div>
 
+      {/* Advanced Filter Panel */}
+      {showFilters && (
+        <div className="px-5 py-4 border-b border-border bg-muted/20">
+          <div className="flex flex-wrap items-end gap-4">
+            {/* Date Range */}
+            <div className="flex items-end gap-2">
+              <div>
+                <label className="block text-[10px] font-semibold uppercase tracking-wider text-muted-foreground mb-1">Date From</label>
+                <input
+                  type="date"
+                  value={dateFrom}
+                  onChange={e => { setDateFrom(e.target.value); setPage(1); }}
+                  className="px-2.5 py-1.5 bg-input border border-border rounded-md text-[12px] focus:outline-none focus:ring-2 focus:ring-ring focus:border-primary transition-all"
+                />
+              </div>
+              <div>
+                <label className="block text-[10px] font-semibold uppercase tracking-wider text-muted-foreground mb-1">Date To</label>
+                <input
+                  type="date"
+                  value={dateTo}
+                  onChange={e => { setDateTo(e.target.value); setPage(1); }}
+                  className="px-2.5 py-1.5 bg-input border border-border rounded-md text-[12px] focus:outline-none focus:ring-2 focus:ring-ring focus:border-primary transition-all"
+                />
+              </div>
+            </div>
+
+            {/* Technician */}
+            <div className="min-w-[180px]">
+              <label className="block text-[10px] font-semibold uppercase tracking-wider text-muted-foreground mb-1">Technician</label>
+              <div className="relative">
+                <input
+                  type="text"
+                  list="technician-list"
+                  placeholder="All technicians…"
+                  value={filterTechnician}
+                  onChange={e => { setFilterTechnician(e.target.value); setPage(1); }}
+                  className="w-full px-2.5 py-1.5 bg-input border border-border rounded-md text-[12px] focus:outline-none focus:ring-2 focus:ring-ring focus:border-primary transition-all"
+                />
+                <datalist id="technician-list">
+                  {technicianOptions.map(t => <option key={t} value={t} />)}
+                </datalist>
+                {filterTechnician && (
+                  <button onClick={() => setFilterTechnician('')} className="absolute right-2 top-1/2 -translate-y-1/2">
+                    <X size={11} className="text-muted-foreground hover:text-foreground" />
+                  </button>
+                )}
+              </div>
+            </div>
+
+            {/* Priority */}
+            <div>
+              <label className="block text-[10px] font-semibold uppercase tracking-wider text-muted-foreground mb-1">Priority</label>
+              <div className="flex items-center gap-1.5">
+                {priorityOptions.map(p => (
+                  <button
+                    key={p}
+                    onClick={() => { setFilterPriority(p); setPage(1); }}
+                    className={`text-[11px] font-semibold px-3 py-1 rounded-full border transition-all duration-150 ${
+                      filterPriority === p
+                        ? p === 'All' ?'bg-primary text-primary-foreground border-primary'
+                          : priorityColorMap[p] + ' border-current' :'bg-muted text-muted-foreground border-transparent hover:border-border hover:text-foreground'
+                    }`}
+                  >
+                    {p}
+                  </button>
+                ))}
+              </div>
+            </div>
+
+            {/* Clear all */}
+            {activeFilterCount > 0 && (
+              <button
+                onClick={clearAllFilters}
+                className="flex items-center gap-1.5 px-3 py-1.5 text-[12px] font-medium text-danger border border-danger/30 rounded-md hover:bg-danger/5 transition-colors"
+              >
+                <X size={12} /> Clear All
+              </button>
+            )}
+
+            <div className="ml-auto text-[12px] text-muted-foreground">
+              <span className="font-semibold text-foreground">{filtered.length}</span> dockets match
+            </div>
+          </div>
+        </div>
+      )}
+
       {/* Table */}
       <div className="overflow-x-auto scrollbar-thin">
         <table className="w-full min-w-[900px]">
@@ -311,6 +491,7 @@ export default function DocketTable({ onCreateDocket }: DocketTableProps) {
                 { key: 'model', label: 'Model' },
                 { key: 'natureOfDocket', label: 'Nature of Docket' },
                 { key: 'status', label: 'Status' },
+                { key: 'priority', label: 'Priority' },
               ].map(col => (
                 <th
                   key={`th-${col.key}`}
@@ -329,7 +510,7 @@ export default function DocketTable({ onCreateDocket }: DocketTableProps) {
           <tbody>
             {paginated.length === 0 ? (
               <tr>
-                <td colSpan={9} className="text-center py-12 text-muted-foreground text-[13px]">
+                <td colSpan={10} className="text-center py-12 text-muted-foreground text-[13px]">
                   {dockets.length === 0 ? 'No dockets found in the database.' : 'No dockets match your search or filter criteria.'}
                 </td>
               </tr>
@@ -363,6 +544,15 @@ export default function DocketTable({ onCreateDocket }: DocketTableProps) {
                     <td className="px-3 py-3 text-[12px] text-foreground">{docket.natureOfDocket}</td>
                     <td className="px-3 py-3">
                       <StatusBadge status={docket.status} />
+                    </td>
+                    <td className="px-3 py-3">
+                      {docket.priority ? (
+                        <span className={`inline-flex items-center px-2 py-0.5 rounded-full text-[10px] font-semibold border ${priorityColorMap[docket.priority]}`}>
+                          {docket.priority}
+                        </span>
+                      ) : (
+                        <span className="text-[11px] text-muted-foreground">—</span>
+                      )}
                     </td>
                     <td className="px-3 py-3">
                       <div className="flex items-center gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
