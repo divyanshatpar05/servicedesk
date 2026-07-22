@@ -48,7 +48,17 @@ type SortKey = keyof Docket;
 
 function mapDbRowToDocket(row: Record<string, unknown>, idx: number): Docket {
   const createdAt = row.created_at ? String(row.created_at) : '';
-  const dateTime = createdAt ? createdAt.replace('T', ' ').slice(0, 16) : '';
+  // Parse ISO date and format as DD/MM/YYYY HH:MM to match imported data format
+  let dateTime = '';
+  if (createdAt) {
+    // Extract date and time parts from ISO string (ignore timezone, use as-is)
+    const isoStr = createdAt.replace('T', ' ').slice(0, 16); // "YYYY-MM-DD HH:MM"
+    const [datePart, timePart] = isoStr.split(' ');
+    if (datePart) {
+      const [year, month, day] = datePart.split('-');
+      dateTime = `${day}/${month}/${year}${timePart ? ' ' + timePart : ''}`;
+    }
+  }
   const status = (row.docket_status as string) || 'New';
   // Map DB status values to UI status values
   const statusMap: Record<string, DocketStatus> = {
@@ -334,7 +344,7 @@ export default function DocketTable({ onCreateDocket }: DocketTableProps) {
                       ${docket.isOverdue ? 'bg-danger/5 hover:bg-danger/10' : rowIdx % 2 === 0 ? 'bg-card hover:bg-muted/40' : 'bg-muted/20 hover:bg-muted/50'}
                     `}
                   >
-                    <td className="px-3 py-3 text-[12px] text-muted-foreground font-medium">{docket.slNo}</td>
+                    <td className="px-3 py-3 text-[12px] text-muted-foreground font-medium">{(page - 1) * perPage + rowIdx + 1}</td>
                     <td className="px-3 py-3">
                       <div className="flex items-center gap-1.5">
                         <span className="font-mono text-[12px] font-semibold text-primary">{docket.docketNo}</span>
