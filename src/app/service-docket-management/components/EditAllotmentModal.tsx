@@ -17,6 +17,7 @@ interface Docket {
   cardNo: string;
   cardDetail: string;
   alternateMob: string;
+  mobileNo2?: string;
   customerAddress: string;
   detail: string;
   feedback: string;
@@ -260,6 +261,24 @@ export default function EditAllotmentModal({ open, entry: docket, onClose, onSav
   const [paymentMode, setPaymentMode] = useState(docket.paymentMode || '');
   const [allotmentDate, setAllotmentDate] = useState(docket.dateTime?.split(' ')[0] || '');
   const [allotmentTime, setAllotmentTime] = useState(docket.dateTime?.split(' ')[1] || '');
+
+  // Editable docket detail fields
+  const [editCustomerName, setEditCustomerName] = useState(docket.customerName || '');
+  const [editMobileNo, setEditMobileNo] = useState(docket.mobileNo || '');
+  const [editAlternateMob, setEditAlternateMob] = useState(docket.alternateMob || '');
+  const [editMobileNo2, setEditMobileNo2] = useState(docket.mobileNo2 || '');
+  const [editCardNo, setEditCardNo] = useState(docket.cardNo || '');
+  const [editCardDetail, setEditCardDetail] = useState(docket.cardDetail || '');
+  const [editCustomerAddress, setEditCustomerAddress] = useState(docket.customerAddress || '');
+  const [editArea, setEditArea] = useState(docket.area || '');
+  const [editZipcode, setEditZipcode] = useState(docket.customerZipcode || '');
+  const [editModel, setEditModel] = useState(docket.model || '');
+  const [editNatureOfDocket, setEditNatureOfDocket] = useState(docket.natureOfDocket || '');
+  const [editSalePoint, setEditSalePoint] = useState(docket.salePoint || '');
+  const [editSalesExecutive, setEditSalesExecutive] = useState(docket.salesExecutive || '');
+  const [editDetail, setEditDetail] = useState(docket.detail || '');
+  const [editFeedback, setEditFeedback] = useState(docket.feedback || '');
+
   const [spares, setSpares] = useState<SpareRow[]>(
     docket.spareItems && docket.spareItems.length > 0
       ? docket.spareItems
@@ -372,7 +391,7 @@ export default function EditAllotmentModal({ open, entry: docket, onClose, onSav
     }
   };
 
-  const handleUpdate = () => {
+  const handleUpdate = async () => {
     // Save spare adjustment as stock inward if spare name is set
     if (adjSpareName) {
       const master = masterSpares.find(m => m.name === adjSpareName);
@@ -380,11 +399,55 @@ export default function EditAllotmentModal({ open, entry: docket, onClose, onSav
       toast.success(`Spare adjustment for "${adjSpareName}" saved as Stock Inward entry.`);
     }
     setSaving(true);
-    setTimeout(() => {
-      setSaving(false);
-      toast.success('Allotment entry updated successfully!');
+    try {
+      const { createClient } = await import('@/lib/supabase/client');
+      const supabase = createClient();
+
+      // Parse date back to ISO for DB
+      let updatedAt = new Date().toISOString();
+      let createdAtUpdate: string | undefined;
+      if (allotmentDate) {
+        const timePart = allotmentTime || '00:00';
+        createdAtUpdate = `${allotmentDate}T${timePart}:00`;
+      }
+
+      const updatePayload: Record<string, unknown> = {
+        customer_name: editCustomerName,
+        mobile_number: editMobileNo,
+        alternate_mobile: editAlternateMob,
+        mobile_number_2: editMobileNo2,
+        card_no: editCardNo,
+        card_detail: editCardDetail,
+        customer_address: editCustomerAddress,
+        area: editArea,
+        zipcode: editZipcode,
+        model_no: editModel,
+        nature_of_docket: editNatureOfDocket,
+        sale_point: editSalePoint,
+        sales_executive: editSalesExecutive,
+        docket_detail: editDetail,
+        feedback: editFeedback,
+        service_engineer: serviceEngineer,
+        updated_at: updatedAt,
+      };
+      if (createdAtUpdate) {
+        updatePayload.created_at = createdAtUpdate;
+      }
+
+      const { error } = await supabase
+        .from('service_dockets')
+        .update(updatePayload)
+        .eq('id', docket.id);
+
+      if (error) throw error;
+      toast.success('Docket updated successfully!');
       onSave();
-    }, 1000);
+    } catch (err: unknown) {
+      const msg = err instanceof Error ? err.message : 'Update failed';
+      toast.error(msg);
+    } finally {
+      setSaving(false);
+    }
   };
 
   const inputCls = "w-full px-2 py-1.5 bg-input border border-border rounded text-[12px] focus:outline-none focus:ring-1 focus:ring-ring focus:border-primary transition-all";
@@ -405,30 +468,188 @@ export default function EditAllotmentModal({ open, entry: docket, onClose, onSav
         </div>
 
         <div className="p-4 space-y-4">
-          {/* Info Panels */}
+          {/* Editable Info Panels */}
           <div className="grid grid-cols-3 gap-3">
+            {/* Docket Detail - editable */}
             <div className="border border-border rounded p-3 bg-blue-50">
               <div className="text-[11px] font-bold text-white bg-cyan-500 px-2 py-1 rounded mb-2 inline-block">DOCKET DETAIL</div>
-              <div className="space-y-1 text-[12px]">
-                <p><span className="font-semibold">Docket No:-</span> {docket.docketNo}</p>
-                <p><span className="font-semibold">Date &amp; Time:-</span> {docket.dateTime}</p>
-                <p><span className="font-semibold">Card No. &amp; Detail:-</span> {docket.cardNo} {docket.cardDetail}</p>
+              <div className="space-y-2 text-[12px]">
+                <div>
+                  <span className="font-semibold block mb-0.5">Docket No:</span>
+                  <span className="font-mono font-bold text-primary">{docket.docketNo}</span>
+                </div>
+                <div>
+                  <span className="font-semibold block mb-0.5">Date &amp; Time:</span>
+                  <div className="flex gap-1">
+                    <input
+                      type="date"
+                      value={allotmentDate}
+                      onChange={e => setAllotmentDate(e.target.value)}
+                      className="flex-1 px-2 py-1 bg-white border border-border rounded text-[11px] focus:outline-none focus:ring-1 focus:ring-ring"
+                    />
+                    <input
+                      type="time"
+                      value={allotmentTime}
+                      onChange={e => setAllotmentTime(e.target.value)}
+                      className="w-24 px-2 py-1 bg-white border border-border rounded text-[11px] focus:outline-none focus:ring-1 focus:ring-ring"
+                    />
+                  </div>
+                </div>
+                <div>
+                  <span className="font-semibold block mb-0.5">Card No:</span>
+                  <input
+                    value={editCardNo}
+                    onChange={e => setEditCardNo(e.target.value)}
+                    className="w-full px-2 py-1 bg-white border border-border rounded text-[11px] focus:outline-none focus:ring-1 focus:ring-ring"
+                    placeholder="Card No"
+                  />
+                </div>
+                <div>
+                  <span className="font-semibold block mb-0.5">Card Detail:</span>
+                  <input
+                    value={editCardDetail}
+                    onChange={e => setEditCardDetail(e.target.value)}
+                    className="w-full px-2 py-1 bg-white border border-border rounded text-[11px] focus:outline-none focus:ring-1 focus:ring-ring"
+                    placeholder="Card Detail"
+                  />
+                </div>
               </div>
             </div>
+
+            {/* Customer Detail - editable */}
             <div className="border border-border rounded p-3 bg-blue-50">
               <div className="text-[11px] font-bold text-white bg-blue-600 px-2 py-1 rounded mb-2 inline-block">CUSTOMER DETAIL</div>
-              <div className="space-y-1 text-[12px]">
-                <p><span className="font-semibold">Customer Name:-</span> {docket.customerName}</p>
-                <p><span className="font-semibold">Mobile No:-</span> {docket.mobileNo}{docket.alternateMob ? `/${docket.alternateMob}` : ''}</p>
-                <p><span className="font-semibold">Address:-</span> {docket.customerAddress}</p>
+              <div className="space-y-2 text-[12px]">
+                <div>
+                  <span className="font-semibold block mb-0.5">Customer Name:</span>
+                  <input
+                    value={editCustomerName}
+                    onChange={e => setEditCustomerName(e.target.value)}
+                    className="w-full px-2 py-1 bg-white border border-border rounded text-[11px] focus:outline-none focus:ring-1 focus:ring-ring"
+                    placeholder="Customer Name"
+                  />
+                </div>
+                <div>
+                  <span className="font-semibold block mb-0.5">Mobile 1:</span>
+                  <input
+                    value={editMobileNo}
+                    onChange={e => setEditMobileNo(e.target.value)}
+                    className="w-full px-2 py-1 bg-white border border-border rounded text-[11px] focus:outline-none focus:ring-1 focus:ring-ring"
+                    placeholder="Mobile 1"
+                  />
+                </div>
+                <div>
+                  <span className="font-semibold block mb-0.5">Mobile 2:</span>
+                  <input
+                    value={editAlternateMob}
+                    onChange={e => setEditAlternateMob(e.target.value)}
+                    className="w-full px-2 py-1 bg-white border border-border rounded text-[11px] focus:outline-none focus:ring-1 focus:ring-ring"
+                    placeholder="Mobile 2"
+                  />
+                </div>
+                <div>
+                  <span className="font-semibold block mb-0.5">Mobile 3:</span>
+                  <input
+                    value={editMobileNo2}
+                    onChange={e => setEditMobileNo2(e.target.value)}
+                    className="w-full px-2 py-1 bg-white border border-border rounded text-[11px] focus:outline-none focus:ring-1 focus:ring-ring"
+                    placeholder="Mobile 3"
+                  />
+                </div>
+                <div>
+                  <span className="font-semibold block mb-0.5">Address:</span>
+                  <input
+                    value={editCustomerAddress}
+                    onChange={e => setEditCustomerAddress(e.target.value)}
+                    className="w-full px-2 py-1 bg-white border border-border rounded text-[11px] focus:outline-none focus:ring-1 focus:ring-ring"
+                    placeholder="Address"
+                  />
+                </div>
+                <div className="flex gap-1">
+                  <div className="flex-1">
+                    <span className="font-semibold block mb-0.5">Area:</span>
+                    <input
+                      value={editArea}
+                      onChange={e => setEditArea(e.target.value)}
+                      className="w-full px-2 py-1 bg-white border border-border rounded text-[11px] focus:outline-none focus:ring-1 focus:ring-ring"
+                      placeholder="Area"
+                    />
+                  </div>
+                  <div className="w-24">
+                    <span className="font-semibold block mb-0.5">Zipcode:</span>
+                    <input
+                      value={editZipcode}
+                      onChange={e => setEditZipcode(e.target.value)}
+                      className="w-full px-2 py-1 bg-white border border-border rounded text-[11px] focus:outline-none focus:ring-1 focus:ring-ring"
+                      placeholder="Zip"
+                    />
+                  </div>
+                </div>
               </div>
             </div>
+
+            {/* Product Detail - editable */}
             <div className="border border-border rounded p-3 bg-red-50">
               <div className="text-[11px] font-bold text-white bg-red-500 px-2 py-1 rounded mb-2 inline-block">PRODUCT DETAIL</div>
-              <div className="space-y-1 text-[12px]">
-                <p><span className="font-semibold">Model No:-</span> {docket.model}</p>
-                <p><span className="font-semibold">Sale Point:-</span> {docket.salePoint}</p>
-                <p><span className="font-semibold">Sales Executive:-</span> {docket.salesExecutive}</p>
+              <div className="space-y-2 text-[12px]">
+                <div>
+                  <span className="font-semibold block mb-0.5">Model No:</span>
+                  <input
+                    value={editModel}
+                    onChange={e => setEditModel(e.target.value)}
+                    className="w-full px-2 py-1 bg-white border border-border rounded text-[11px] focus:outline-none focus:ring-1 focus:ring-ring"
+                    placeholder="Model No"
+                  />
+                </div>
+                <div>
+                  <span className="font-semibold block mb-0.5">Nature of Docket:</span>
+                  <select
+                    value={editNatureOfDocket}
+                    onChange={e => setEditNatureOfDocket(e.target.value)}
+                    className="w-full px-2 py-1 bg-white border border-border rounded text-[11px] focus:outline-none focus:ring-1 focus:ring-ring appearance-auto"
+                  >
+                    <option value="">Select Type</option>
+                    {['AMC', 'Repair', 'Installation', 'Warranty', 'Inspection', 'Maintenance'].map(o => (
+                      <option key={o} value={o}>{o}</option>
+                    ))}
+                  </select>
+                </div>
+                <div>
+                  <span className="font-semibold block mb-0.5">Sale Point:</span>
+                  <input
+                    value={editSalePoint}
+                    onChange={e => setEditSalePoint(e.target.value)}
+                    className="w-full px-2 py-1 bg-white border border-border rounded text-[11px] focus:outline-none focus:ring-1 focus:ring-ring"
+                    placeholder="Sale Point"
+                  />
+                </div>
+                <div>
+                  <span className="font-semibold block mb-0.5">Sales Executive:</span>
+                  <input
+                    value={editSalesExecutive}
+                    onChange={e => setEditSalesExecutive(e.target.value)}
+                    className="w-full px-2 py-1 bg-white border border-border rounded text-[11px] focus:outline-none focus:ring-1 focus:ring-ring"
+                    placeholder="Sales Executive"
+                  />
+                </div>
+                <div>
+                  <span className="font-semibold block mb-0.5">Detail:</span>
+                  <input
+                    value={editDetail}
+                    onChange={e => setEditDetail(e.target.value)}
+                    className="w-full px-2 py-1 bg-white border border-border rounded text-[11px] focus:outline-none focus:ring-1 focus:ring-ring"
+                    placeholder="Detail"
+                  />
+                </div>
+                <div>
+                  <span className="font-semibold block mb-0.5">Feedback:</span>
+                  <input
+                    value={editFeedback}
+                    onChange={e => setEditFeedback(e.target.value)}
+                    className="w-full px-2 py-1 bg-white border border-border rounded text-[11px] focus:outline-none focus:ring-1 focus:ring-ring"
+                    placeholder="Feedback"
+                  />
+                </div>
               </div>
             </div>
           </div>

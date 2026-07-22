@@ -16,6 +16,7 @@ interface Docket {
   dateTime: string;
   customerName: string;
   mobileNo: string;
+  mobileNo2: string;
   model: string;
   natureOfDocket: string;
   status: DocketStatus;
@@ -79,6 +80,7 @@ function mapDbRowToDocket(row: Record<string, unknown>, idx: number): Docket {
     dateTime,
     customerName: String(row.customer_name || ''),
     mobileNo: String(row.mobile_number || ''),
+    mobileNo2: String(row.mobile_number_2 || ''),
     model: String(row.model_no || ''),
     natureOfDocket: String(row.nature_of_docket || ''),
     status: uiStatus,
