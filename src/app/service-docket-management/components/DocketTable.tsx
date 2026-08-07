@@ -50,14 +50,23 @@ interface DocketTableProps {
 type SortKey = keyof Docket;
 
 function mapDbRowToDocket(row: Record<string, unknown>, idx: number): Docket {
-  const createdAt = row.created_at ? String(row.created_at) : '';
+  // Prefer docket_date (the actual date from the file/form), fall back to created_at
   let dateTime = '';
-  if (createdAt) {
-    const isoStr = createdAt.replace('T', ' ').slice(0, 16);
-    const [datePart] = isoStr.split(' ');
-    if (datePart) {
-      const [year, month, day] = datePart.split('-');
+  if (row.docket_date) {
+    const docketDateStr = String(row.docket_date);
+    const [year, month, day] = docketDateStr.split('T')[0].split('-');
+    if (year && month && day) {
       dateTime = `${day}/${month}/${year}`;
+    }
+  } else {
+    const createdAt = row.created_at ? String(row.created_at) : '';
+    if (createdAt) {
+      const isoStr = createdAt.replace('T', ' ').slice(0, 16);
+      const [datePart] = isoStr.split(' ');
+      if (datePart) {
+        const [year, month, day] = datePart.split('-');
+        dateTime = `${day}/${month}/${year}`;
+      }
     }
   }
   const status = (row.docket_status as string) || 'New';

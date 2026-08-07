@@ -83,9 +83,9 @@ const importConfigs: Record<ImportType, ImportConfig> = {
     label: 'Service Dockets',
     icon: <Wrench size={18} />,
     color: 'bg-orange-100 text-orange-700 border-orange-200',
-    requiredColumns: ['Docket No', 'Customer Name', 'Mobile No 1', 'Mobile No 2', 'Mobile No 3', 'Model', 'Nature of Docket', 'Status', 'Date'],
+    requiredColumns: ['Docket No', 'Customer Name', 'Mobile No 1', 'Mobile No 2', 'Model', 'Nature of Docket', 'Status', 'Date'],
     sampleData: [
-      { 'Docket No': '100000001', 'Customer Name': 'Priya Sharma', 'Mobile No 1': '9820145678', 'Mobile No 2': '8390200001', 'Mobile No 3': '', 'Model': 'VEGA DLX-60', 'Nature of Docket': 'AMC', 'Status': 'New', 'Date': '01/01/2026' },
+      { 'Docket No': '100000001', 'Customer Name': 'Priya Sharma', 'Mobile No 1': '9820145678', 'Mobile No 2': '8390200001', 'Model': 'VEGA DLX-60', 'Nature of Docket': 'AMC', 'Status': 'New', 'Date': '01/01/2026' },
     ],
   },
   spare_parts: {
@@ -233,7 +233,7 @@ function transformDocketRow(
   mapping: Record<string, string>
 ): Record<string, string> {
   const result: Record<string, string> = {};
-  const standardCols = ['Docket No', 'Customer Name', 'Mobile No 1', 'Mobile No 2', 'Mobile No 3', 'Model', 'Nature of Docket', 'Status'];
+  const standardCols = ['Docket No', 'Customer Name', 'Mobile No 1', 'Mobile No 2', 'Model', 'Nature of Docket', 'Status'];
   standardCols.forEach(col => {
     const src = mapping[col];
     result[col] = src ? (row[src] || '') : '';
@@ -326,6 +326,7 @@ export default function BulkImportPage() {
             return;
           }
 
+          // transformed['Date'] is already in DD/MM/YYYY from transformDocketRow, parse to ISO
           const isoDate = parseDate(transformed['Date']);
 
           toInsert.push({
@@ -337,7 +338,7 @@ export default function BulkImportPage() {
             model_no: transformed['Model'],
             nature_of_docket: transformed['Nature of Docket'] || null,
             docket_status: mapStatusToDb(transformed['Status'] || 'New'),
-            created_at: isoDate ? `${isoDate}T00:00:00` : new Date().toISOString(),
+            docket_date: isoDate || null,
           });
         });
 

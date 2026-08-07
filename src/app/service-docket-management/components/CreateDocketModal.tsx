@@ -14,7 +14,6 @@ interface DocketFormData {
   mobileNo: string;
   alternateMobNo: string;
   mobileNo2: string;
-  mobileNo3: string;
   customerAddress: string;
   modelNo: string;
   natureOfDocket: string;
@@ -77,7 +76,6 @@ export default function CreateDocketModal({ open, onClose, onDocketCreated }: Cr
     mobileNo: '',
     alternateMobNo: '',
     mobileNo2: '',
-    mobileNo3: '',
     customerAddress: '',
     modelNo: '',
     natureOfDocket: '',
@@ -135,7 +133,6 @@ export default function CreateDocketModal({ open, onClose, onDocketCreated }: Cr
       mobileNo: '',
       alternateMobNo: '',
       mobileNo2: '',
-      mobileNo3: '',
       customerAddress: '',
       modelNo: '',
       natureOfDocket: '',
@@ -228,18 +225,6 @@ export default function CreateDocketModal({ open, onClose, onDocketCreated }: Cr
               className={inputCls}
             />
           </div>
-          <div>
-            <label className={labelCls}>Mobile 3</label>
-            <input
-              value={form.mobileNo2}
-              onChange={e => handleChange('mobileNo2', e.target.value)}
-              className={inputCls}
-            />
-          </div>
-        </div>
-
-        {/* Row 2b: Customer Address */}
-        <div className="grid grid-cols-1 gap-4">
           <div>
             <label className={labelCls}>Customer Address</label>
             <input
