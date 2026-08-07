@@ -54,10 +54,10 @@ function mapDbRowToDocket(row: Record<string, unknown>, idx: number): Docket {
   let dateTime = '';
   if (createdAt) {
     const isoStr = createdAt.replace('T', ' ').slice(0, 16);
-    const [datePart, timePart] = isoStr.split(' ');
+    const [datePart] = isoStr.split(' ');
     if (datePart) {
       const [year, month, day] = datePart.split('-');
-      dateTime = `${day}/${month}/${year}${timePart ? ' ' + timePart : ''}`;
+      dateTime = `${day}/${month}/${year}`;
     }
   }
   const status = (row.docket_status as string) || 'New';
@@ -261,9 +261,10 @@ export default function DocketTable({ onCreateDocket }: DocketTableProps) {
     const exportData = filtered.map(d => ({
       'Sl No': d.slNo,
       'Docket No': d.docketNo,
-      'Date & Time': d.dateTime,
+      'Date': d.dateTime,
       'Customer Name': d.customerName,
-      'Mobile No': d.mobileNo,
+      'Mobile No 1': d.mobileNo,
+      'Mobile No 2': d.mobileNo2,
       'Model': d.model,
       'Nature of Docket': d.natureOfDocket,
       'Status': d.status,
@@ -487,9 +488,10 @@ export default function DocketTable({ onCreateDocket }: DocketTableProps) {
               {[
                 { key: 'slNo', label: 'Sl No' },
                 { key: 'docketNo', label: 'Docket No.' },
-                { key: 'dateTime', label: 'Date & Time' },
+                { key: 'dateTime', label: 'Date' },
                 { key: 'customerName', label: 'Customer Name' },
-                { key: 'mobileNo', label: 'Mobile No.' },
+                { key: 'mobileNo', label: 'Mobile No 1' },
+                { key: 'mobileNo2', label: 'Mobile No 2' },
                 { key: 'model', label: 'Model' },
                 { key: 'natureOfDocket', label: 'Nature of Docket' },
                 { key: 'status', label: 'Status' },
@@ -512,7 +514,7 @@ export default function DocketTable({ onCreateDocket }: DocketTableProps) {
           <tbody>
             {paginated.length === 0 ? (
               <tr>
-                <td colSpan={10} className="text-center py-12 text-muted-foreground text-[13px]">
+                <td colSpan={11} className="text-center py-12 text-muted-foreground text-[13px]">
                   {dockets.length === 0 ? 'No dockets found in the database.' : 'No dockets match your search or filter criteria.'}
                 </td>
               </tr>
@@ -542,6 +544,7 @@ export default function DocketTable({ onCreateDocket }: DocketTableProps) {
                       </div>
                     </td>
                     <td className="px-3 py-3 text-[12px] font-mono text-foreground">{docket.mobileNo}</td>
+                    <td className="px-3 py-3 text-[12px] font-mono text-foreground">{docket.mobileNo2 || <span className="text-muted-foreground">—</span>}</td>
                     <td className="px-3 py-3 text-[12px] text-foreground">{docket.model}</td>
                     <td className="px-3 py-3 text-[12px] text-foreground">{docket.natureOfDocket}</td>
                     <td className="px-3 py-3">

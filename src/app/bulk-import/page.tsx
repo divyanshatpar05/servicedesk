@@ -83,9 +83,9 @@ const importConfigs: Record<ImportType, ImportConfig> = {
     label: 'Service Dockets',
     icon: <Wrench size={18} />,
     color: 'bg-orange-100 text-orange-700 border-orange-200',
-    requiredColumns: ['Docket No', 'Customer Name', 'Mobile No 1', 'Mobile No 2', 'Mobile No 3', 'Model', 'Nature of Docket', 'Status', 'Date/Time'],
+    requiredColumns: ['Docket No', 'Customer Name', 'Mobile No 1', 'Mobile No 2', 'Mobile No 3', 'Model', 'Nature of Docket', 'Status', 'Date'],
     sampleData: [
-      { 'Docket No': '100000001', 'Customer Name': 'Priya Sharma', 'Mobile No 1': '9820145678', 'Mobile No 2': '8390200001', 'Mobile No 3': '', 'Model': 'VEGA DLX-60', 'Nature of Docket': 'AMC', 'Status': 'New', 'Date/Time': '01/01/2026 16:06' },
+      { 'Docket No': '100000001', 'Customer Name': 'Priya Sharma', 'Mobile No 1': '9820145678', 'Mobile No 2': '8390200001', 'Mobile No 3': '', 'Model': 'VEGA DLX-60', 'Nature of Docket': 'AMC', 'Status': 'New', 'Date': '01/01/2026' },
     ],
   },
   spare_parts: {
@@ -238,17 +238,15 @@ function transformDocketRow(
     const src = mapping[col];
     result[col] = src ? (row[src] || '') : '';
   });
-  const dtSrc = mapping['Date/Time'];
-  const rawDT = dtSrc ? (row[dtSrc] || '') : '';
-  const { date, time } = splitDateTime(rawDT);
-  result['Date'] = date;
-  result['Time'] = time;
+  const dateSrc = mapping['Date'];
+  const rawDate = dateSrc ? (row[dateSrc] || '') : '';
+  result['Date'] = rawDate;
   return result;
 }
 
 const DOCKET_DISPLAY_COLUMNS = [
   'Docket No', 'Customer Name', 'Mobile No 1', 'Mobile No 2', 'Mobile No 3',
-  'Model', 'Nature of Docket', 'Status', 'Date', 'Time',
+  'Model', 'Nature of Docket', 'Status', 'Date',
 ];
 
 type ImportStep = 'select' | 'upload' | 'map' | 'preview' | 'done';
@@ -273,7 +271,7 @@ export default function BulkImportPage() {
     const reader = new FileReader();
     reader.onload = (evt) => {
       const data = evt.target?.result;
-      const wb = XLSX.read(data, { type: 'binary' });
+      const wb = XLSX.read(data, { type: 'binary', cellDates: false, raw: true });
       const ws = wb.Sheets[wb.SheetNames[0]];
       const json = XLSX.utils.sheet_to_json<Record<string, string>>(ws, { defval: '' });
       if (json.length > 0) {
@@ -321,7 +319,7 @@ export default function BulkImportPage() {
           if (!transformed['Customer Name']) missing.push('Customer Name');
           if (!transformed['Mobile No 1']) missing.push('Mobile No 1');
           if (!transformed['Model']) missing.push('Model');
-          if (!transformed['Date']) missing.push('Date/Time');
+          if (!transformed['Date']) missing.push('Date');
 
           if (missing.length > 0) {
             errors.push(`Row ${idx + 2}: Missing ${missing.join(', ')}`);
@@ -329,9 +327,6 @@ export default function BulkImportPage() {
           }
 
           const isoDate = parseDate(transformed['Date']);
-          const createdAt = isoDate
-            ? `${isoDate}T${transformed['Time'] ? transformed['Time'] + ':00' : '00:00:00'}`
-            : new Date().toISOString();
 
           toInsert.push({
             user_id: userId,
@@ -342,7 +337,7 @@ export default function BulkImportPage() {
             model_no: transformed['Model'],
             nature_of_docket: transformed['Nature of Docket'] || null,
             docket_status: mapStatusToDb(transformed['Status'] || 'New'),
-            created_at: createdAt,
+            created_at: isoDate ? `${isoDate}T00:00:00` : new Date().toISOString(),
           });
         });
 
