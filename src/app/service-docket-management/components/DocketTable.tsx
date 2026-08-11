@@ -82,10 +82,22 @@ function mapDbRowToDocket(row: Record<string, unknown>, idx: number): Docket {
   const dbPriority = (row.priority as string) || '';
   const priority: Docket['priority'] = (['High', 'Medium', 'Low'].includes(dbPriority) ? dbPriority : '') as Docket['priority'];
 
+  // Convert docket_number safely to avoid scientific notation (e.g. 1.221E+09)
+  const rawDocketNo = row.docket_number;
+  let docketNo = '';
+  if (rawDocketNo !== null && rawDocketNo !== undefined) {
+    if (typeof rawDocketNo === 'number') {
+      // Use toFixed(0) to avoid scientific notation for large integers
+      docketNo = rawDocketNo.toFixed(0);
+    } else {
+      docketNo = String(rawDocketNo);
+    }
+  }
+
   return {
     id: String(row.id),
     slNo: idx + 1,
-    docketNo: String(row.docket_number || ''),
+    docketNo,
     dateTime,
     customerName: String(row.customer_name || ''),
     mobileNo: String(row.mobile_number || ''),
@@ -130,8 +142,8 @@ export default function DocketTable({ onCreateDocket }: DocketTableProps) {
   const [error, setError] = useState<string | null>(null);
   const [search, setSearch] = useState('');
   const [filterStatus, setFilterStatus] = useState<string>('All');
-  const [sortKey, setSortKey] = useState<SortKey>('slNo');
-  const [sortDir, setSortDir] = useState<'asc' | 'desc'>('asc');
+  const [sortKey, setSortKey] = useState<SortKey>('dateTime');
+  const [sortDir, setSortDir] = useState<'asc' | 'desc'>('desc');
   const [page, setPage] = useState(1);
   const [perPage, setPerPage] = useState(8);
   const [editingDocket, setEditingDocket] = useState<Docket | null>(null);
@@ -235,6 +247,14 @@ export default function DocketTable({ onCreateDocket }: DocketTableProps) {
     }
 
     d.sort((a, b) => {
+      // For dateTime column, sort by actual date value for correct ordering
+      if (sortKey === 'dateTime') {
+        const da = parseDocketDate(a.dateTime);
+        const db = parseDocketDate(b.dateTime);
+        const ta = da ? da.getTime() : 0;
+        const tb = db ? db.getTime() : 0;
+        return sortDir === 'asc' ? ta - tb : tb - ta;
+      }
       const av = String(a[sortKey]);
       const bv = String(b[sortKey]);
       return sortDir === 'asc' ? av.localeCompare(bv) : bv.localeCompare(av);
