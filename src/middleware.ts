@@ -21,14 +21,18 @@ export async function middleware(request: NextRequest) {
           cookiesToSet.forEach(({ name, value }) => request.cookies.set(name, value));
           response = NextResponse.next({ request });
           cookiesToSet.forEach(({ name, value, options }) =>
-            response.cookies.set(name, value, options)
+            response.cookies.set(name, value, {
+              ...options,
+              sameSite: 'lax',
+            })
           );
         },
       },
     }
   );
 
-  const { data: { session } } = await supabase.auth.getSession();
+  // Use getUser() for reliable auth check (getSession() can fail in sandboxed envs)
+  const { data: { user } } = await supabase.auth.getUser();
 
   const { pathname } = request.nextUrl;
 
@@ -36,11 +40,11 @@ export async function middleware(request: NextRequest) {
   const publicRoutes = ['/login', '/sign-up-login-screen', '/auth/callback', '/technician-work'];
   const isPublic = publicRoutes.some(r => pathname.startsWith(r));
 
-  if (!session && !isPublic) {
+  if (!user && !isPublic) {
     return NextResponse.redirect(new URL('/login', request.url));
   }
 
-  if (session && (pathname === '/login' || pathname === '/sign-up-login-screen')) {
+  if (user && (pathname === '/login' || pathname === '/sign-up-login-screen')) {
     return NextResponse.redirect(new URL('/', request.url));
   }
 
