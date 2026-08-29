@@ -32,7 +32,14 @@ export async function middleware(request: NextRequest) {
   );
 
   // Use getUser() for reliable auth check (getSession() can fail in sandboxed envs)
-  const { data: { user } } = await supabase.auth.getUser();
+  let user = null;
+  try {
+    const { data } = await supabase.auth.getUser();
+    user = data.user;
+  } catch {
+    // Network error (e.g. 502 from Supabase auth server) — treat as unauthenticated
+    user = null;
+  }
 
   const { pathname } = request.nextUrl;
 
