@@ -31,14 +31,15 @@ export async function middleware(request: NextRequest) {
     }
   );
 
-  // Use getUser() for reliable auth check (getSession() can fail in sandboxed envs)
-  let user = null;
+  // Use getSession() instead of getUser() — reads from cookies, no network call
+  // This prevents "Failed to fetch" errors when Supabase auth server is unreachable
+  let session = null;
   try {
-    const { data } = await supabase.auth.getUser();
-    user = data.user;
+    const { data } = await supabase.auth.getSession();
+    session = data.session;
   } catch {
-    // Network error (e.g. 502 from Supabase auth server) — treat as unauthenticated
-    user = null;
+    // Network error — treat as unauthenticated, allow public routes
+    session = null;
   }
 
   const { pathname } = request.nextUrl;
@@ -47,11 +48,11 @@ export async function middleware(request: NextRequest) {
   const publicRoutes = ['/login', '/sign-up-login-screen', '/auth/callback', '/technician-work'];
   const isPublic = publicRoutes.some(r => pathname.startsWith(r));
 
-  if (!user && !isPublic) {
+  if (!session && !isPublic) {
     return NextResponse.redirect(new URL('/login', request.url));
   }
 
-  if (user && (pathname === '/login' || pathname === '/sign-up-login-screen')) {
+  if (session && (pathname === '/login' || pathname === '/sign-up-login-screen')) {
     return NextResponse.redirect(new URL('/', request.url));
   }
 

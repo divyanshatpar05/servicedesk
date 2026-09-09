@@ -21,10 +21,15 @@ export const AuthProvider = ({ children }: { children: React.ReactNode }) => {
   const supabase = createClient();
 
   useEffect(() => {
-    // Get initial session
+    // Get initial session — wrap in try/catch to handle network errors gracefully
     supabase.auth.getSession().then(({ data: { session } }) => {
       setSession(session);
       setUser(session?.user ?? null);
+      setLoading(false);
+    }).catch(() => {
+      // Network error fetching session — treat as unauthenticated
+      setSession(null);
+      setUser(null);
       setLoading(false);
     });
 
