@@ -32,13 +32,11 @@ export async function middleware(request: NextRequest) {
   );
 
   // Use getSession() instead of getUser() — reads from cookies, no network call
-  // This prevents "Failed to fetch" errors when Supabase auth server is unreachable
   let session = null;
   try {
     const { data } = await supabase.auth.getSession();
     session = data.session;
   } catch {
-    // Network error — treat as unauthenticated, allow public routes
     session = null;
   }
 
@@ -53,6 +51,25 @@ export async function middleware(request: NextRequest) {
   }
 
   if (session && (pathname === '/login' || pathname === '/sign-up-login-screen')) {
+    // Role-based redirect: fetch role from user_roles table
+    try {
+      const email = session.user?.email;
+      if (email) {
+        const { data: roleData } = await supabase
+          .from('user_roles')
+          .select('role')
+          .eq('email', email)
+          .single();
+
+        const role = roleData?.role;
+        if (role === 'technician') {
+          return NextResponse.redirect(new URL('/technician-dashboard', request.url));
+        }
+      }
+    } catch {
+      // fallback to default redirect
+    }
+    // admin and user roles go to main dashboard
     return NextResponse.redirect(new URL('/', request.url));
   }
 
