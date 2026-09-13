@@ -1,79 +1,15 @@
 import { NextResponse } from 'next/server';
 import type { NextRequest } from 'next/server';
-import { createServerClient } from '@supabase/ssr';
 
 export async function middleware(request: NextRequest) {
-  let response = NextResponse.next({
-    request: {
-      headers: request.headers,
-    },
-  });
-
-  const supabase = createServerClient(
-    process.env.NEXT_PUBLIC_SUPABASE_URL!,
-    process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!,
-    {
-      cookies: {
-        getAll() {
-          return request.cookies.getAll();
-        },
-        setAll(cookiesToSet) {
-          cookiesToSet.forEach(({ name, value }) => request.cookies.set(name, value));
-          response = NextResponse.next({ request });
-          cookiesToSet.forEach(({ name, value, options }) =>
-            response.cookies.set(name, value, {
-              ...options,
-              sameSite: 'lax',
-            })
-          );
-        },
-      },
-    }
-  );
-
-  // Use getSession() instead of getUser() — reads from cookies, no network call
-  let session = null;
-  try {
-    const { data } = await supabase.auth.getSession();
-    session = data.session;
-  } catch {
-    session = null;
-  }
-
   const { pathname } = request.nextUrl;
 
-  // Public routes that don't require auth
-  const publicRoutes = ['/login', '/sign-up-login-screen', '/auth/callback', '/technician-work'];
-  const isPublic = publicRoutes.some(r => pathname.startsWith(r));
-
-  if (!session && !isPublic) {
-    return NextResponse.redirect(new URL('/login', request.url));
-  }
-
-  if (session && (pathname === '/login' || pathname === '/sign-up-login-screen')) {
-    // Role-based redirect: fetch role from user_roles table
-    try {
-      const email = session.user?.email;
-      if (email) {
-        const { data: roleData } = await supabase
-          .from('user_roles')
-          .select('role')
-          .eq('email', email)
-          .single();
-
-        const role = roleData?.role;
-        if (role === 'technician') {
-          return NextResponse.redirect(new URL('/technician-dashboard', request.url));
-        }
-      }
-    } catch {
-      // fallback to default redirect
-    }
-    // admin and user roles go to main dashboard
+  // Redirect login/sign-up pages directly to main dashboard
+  if (pathname === '/login' || pathname === '/sign-up-login-screen') {
     return NextResponse.redirect(new URL('/', request.url));
   }
 
-  return response;
+  return NextResponse.next();
 }
 
 export const config = {
