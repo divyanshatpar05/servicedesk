@@ -1,25 +1,21 @@
 'use client';
-import React from 'react';
+import React, { useEffect, useState, useCallback } from 'react';
 import {
   AreaChart, Area, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, Legend,
 } from 'recharts';
+import { createClient } from '@/lib/supabase/client';
 
-const data = [
-  { date: 'Jun 27', new: 8, completed: 5, overdue: 1 },
-  { date: 'Jun 28', new: 12, completed: 9, overdue: 2 },
-  { date: 'Jun 29', new: 6, completed: 8, overdue: 1 },
-  { date: 'Jun 30', new: 15, completed: 11, overdue: 3 },
-  { date: 'Jul 1', new: 10, completed: 7, overdue: 2 },
-  { date: 'Jul 2', new: 4, completed: 6, overdue: 1 },
-  { date: 'Jul 3', new: 3, completed: 4, overdue: 0 },
-  { date: 'Jul 4', new: 14, completed: 10, overdue: 2 },
-  { date: 'Jul 5', new: 18, completed: 13, overdue: 4 },
-  { date: 'Jul 6', new: 11, completed: 9, overdue: 3 },
-  { date: 'Jul 7', new: 9, completed: 12, overdue: 2 },
-  { date: 'Jul 8', new: 16, completed: 14, overdue: 1 },
-  { date: 'Jul 9', new: 13, completed: 11, overdue: 2 },
-  { date: 'Jul 10', new: 7, completed: 5, overdue: 1 },
-];
+interface TrendEntry {
+  date: string;
+  new: number;
+  completed: number;
+  overdue: number;
+}
+
+interface DocketRow {
+  docket_status: string;
+  created_at: string;
+}
 
 const CustomTooltip = ({ active, payload, label }: { active?: boolean; payload?: { name: string; value: number; color: string }[]; label?: string }) => {
   if (!active || !payload) return null;
@@ -37,7 +33,72 @@ const CustomTooltip = ({ active, payload, label }: { active?: boolean; payload?:
   );
 };
 
+const MONTH_ABBR = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
+
+function formatDateLabel(dateStr: string): string {
+  const d = new Date(dateStr);
+  return `${MONTH_ABBR[d.getMonth()]} ${d.getDate()}`;
+}
+
 export default function DocketTrendChart() {
+  const [data, setData] = useState<TrendEntry[]>([]);
+
+  const fetchData = useCallback(async () => {
+    try {
+      const supabase = createClient();
+      const since = new Date(Date.now() - 14 * 24 * 60 * 60 * 1000).toISOString();
+
+      const { data: dockets } = await supabase
+        .from('service_dockets')
+        .select('docket_status, created_at')
+        .gte('created_at', since);
+
+      if (!dockets) return;
+
+      // Build last 14 days map
+      const dayMap: Record<string, { new: number; completed: number; overdue: number }> = {};
+      for (let i = 13; i >= 0; i--) {
+        const d = new Date(Date.now() - i * 24 * 60 * 60 * 1000);
+        const key = d.toISOString().split('T')[0];
+        dayMap[key] = { new: 0, completed: 0, overdue: 0 };
+      }
+
+      dockets.forEach((d: DocketRow) => {
+        const day = String(d.created_at || '').split('T')[0];
+        if (!dayMap[day]) return;
+        const s = String(d.docket_status || '').toUpperCase();
+        dayMap[day].new++;
+        if (s === 'COMPLETED') dayMap[day].completed++;
+        if (s === 'OVERDUE') dayMap[day].overdue++;
+      });
+
+      setData(
+        Object.entries(dayMap).map(([dateKey, counts]) => ({
+          date: formatDateLabel(dateKey),
+          ...counts,
+        }))
+      );
+    } catch {
+      // keep previous data
+    }
+  }, []);
+
+  useEffect(() => {
+    fetchData();
+
+    const supabase = createClient();
+    const channel = supabase
+      .channel('realtime:docket_trend_chart:service_dockets')
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'service_dockets' }, () => {
+        fetchData();
+      })
+      .subscribe();
+
+    return () => {
+      supabase.removeChannel(channel);
+    };
+  }, [fetchData]);
+
   return (
     <ResponsiveContainer width="100%" height={220}>
       <AreaChart data={data} margin={{ top: 4, right: 8, left: -20, bottom: 0 }}>

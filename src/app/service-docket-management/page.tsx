@@ -10,7 +10,7 @@ export default function ServiceDocketManagementPage() {
   return (
     <AppLayout
       title="Service Docket Management"
-      subtitle="Manage job cards across all service areas · 72 open dockets"
+      subtitle="Manage job cards across all service areas"
     >
       <DocketTable onCreateDocket={() => setCreateOpen(true)} />
       <CreateDocketModal open={createOpen} onClose={() => setCreateOpen(false)} />

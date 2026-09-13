@@ -10,9 +10,13 @@ const canUseCookies = (() => {
     if (typeof document === 'undefined') return false;
     if (cache !== null) return cache;
     const k = '__sb_test__';
-    document.cookie = `${k}=1; Path=/; SameSite=None; Secure; Partitioned`;
-    cache = document.cookie.includes(k);
-    document.cookie = `${k}=; Path=/; Max-Age=0; SameSite=None; Secure`;
+    try {
+      document.cookie = `${k}=1; Path=/; SameSite=Lax`;
+      cache = document.cookie.includes(k);
+      document.cookie = `${k}=; Path=/; Max-Age=0; SameSite=Lax`;
+    } catch {
+      cache = false;
+    }
     return cache;
   };
 })();
@@ -42,7 +46,7 @@ const fromStorage = () => {
 };
 
 const setCookie = (name: string, value: string, options?: any) => {
-  let s = `${name}=${encodeURIComponent(value)}; Path=${options?.path || '/'}; SameSite=None; Secure; Partitioned`;
+  let s = `${name}=${encodeURIComponent(value)}; Path=${options?.path || '/'}; SameSite=Lax`;
   if (options?.maxAge) s += `; Max-Age=${options.maxAge}`;
   if (options?.domain) s += `; Domain=${options.domain}`;
   if (options?.expires) s += `; Expires=${new Date(options.expires).toUTCString()}`;
@@ -56,7 +60,6 @@ const deleteCookie = (name: string) => {
   const variants = [
     'Path=/; SameSite=Lax',
     'Path=/; SameSite=None; Secure',
-    'Path=/; SameSite=None; Secure; Partitioned',
   ];
   variants.forEach((attrs) => {
     document.cookie = `${name}=; Max-Age=0; ${attrs}`;
@@ -65,29 +68,6 @@ const deleteCookie = (name: string) => {
     });
   });
 };
-
-const getToken = () =>
-  (canUseCookies() ? fromCookies() : fromStorage()).find((c) =>
-    c.name.includes('auth-token')
-  )?.value ?? null;
-
-if (typeof window !== 'undefined' && !(window as any).__sb_patched__) {
-  (window as any).__sb_patched__ = true;
-  const orig = window.fetch.bind(window);
-  window.fetch = (input, init) => {
-    const token = getToken();
-    const url =
-      typeof input === 'string'
-        ? input
-        : input instanceof URL
-        ? input.href
-        : (input as Request).url;
-    if (token && (url.startsWith('/') || url.startsWith(window.location.origin))) {
-      init = { ...(init || {}), headers: { ...(init?.headers || {}), 'x-sb-token': token } };
-    }
-    return orig(input, init);
-  };
-}
 
 export function createClient() {
   return createBrowserClient(

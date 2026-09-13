@@ -1,8 +1,10 @@
 'use client';
-import React, { useState, useEffect } from 'react';
+import React, { useState } from 'react';
 import AppLayout from '@/components/AppLayout';
 import { Calendar, Search, Download } from 'lucide-react';
 import * as XLSX from 'xlsx';
+import { createClient } from '@/lib/supabase/client';
+import { toast } from 'sonner';
 
 interface SaleReportRow {
   spareName: string;
@@ -14,59 +16,46 @@ interface SaleReportRow {
   date: string;
 }
 
-const STORAGE_KEY_DOCKETS = 'serviceDockets';
-
-function getDockets(): any[] {
-  try {
-    const stored = localStorage.getItem(STORAGE_KEY_DOCKETS);
-    if (stored) return JSON.parse(stored);
-  } catch { }
-  return [];
-}
-
 export default function SpareMasterSaleReportPage() {
   const [fromDate, setFromDate] = useState('');
   const [toDate, setToDate] = useState('');
   const [rows, setRows] = useState<SaleReportRow[]>([]);
   const [searched, setSearched] = useState(false);
+  const [loading, setLoading] = useState(false);
 
-  const handleSearch = () => {
-    const dockets = getDockets();
-    const result: SaleReportRow[] = [];
+  const handleSearch = async () => {
+    setLoading(true);
+    try {
+      const supabase = createClient();
+      const result: SaleReportRow[] = [];
 
-    dockets.forEach((d: any) => {
-      const docketDate = d.dateTime ? d.dateTime.split(' ')[0] : d.date || '';
-      if (fromDate && docketDate < fromDate) return;
-      if (toDate && docketDate > toDate) return;
+      const { data: allotments } = await supabase
+        .from('technician_allotments')
+        .select('docket_number, allotment_date, customer_name, spare_part_name, spare_part_amount');
 
-      // Extract spare parts from docket
-      if (d.spares && Array.isArray(d.spares)) {
-        d.spares.forEach((spare: any) => {
-          result.push({
-            spareName: spare.name || spare.spareName || '',
-            qtySold: spare.qty || 1,
-            rate: spare.rate || spare.amount || 0,
-            totalAmount: spare.total || (spare.qty || 1) * (spare.rate || spare.amount || 0),
-            docketNo: d.docketNo || d.id || '',
-            customerName: d.customerName || '',
-            date: docketDate,
-          });
-        });
-      } else if (d.sparePartAmount && d.sparePartAmount > 0) {
+      (allotments || []).forEach((a: Record<string, unknown>) => {
+        const aDate = a.allotment_date ? String(a.allotment_date).split('T')[0] : '';
+        if (fromDate && aDate < fromDate) return;
+        if (toDate && aDate > toDate) return;
+        if (!a.spare_part_amount || Number(a.spare_part_amount) === 0) return;
         result.push({
-          spareName: 'Spare Parts',
+          spareName: String(a.spare_part_name || 'Spare Parts'),
           qtySold: 1,
-          rate: d.sparePartAmount,
-          totalAmount: d.sparePartAmount,
-          docketNo: d.docketNo || d.id || '',
-          customerName: d.customerName || '',
-          date: docketDate,
+          rate: Number(a.spare_part_amount || 0),
+          totalAmount: Number(a.spare_part_amount || 0),
+          docketNo: String(a.docket_number || ''),
+          customerName: String(a.customer_name || ''),
+          date: aDate,
         });
-      }
-    });
+      });
 
-    setRows(result);
-    setSearched(true);
+      setRows(result);
+      setSearched(true);
+    } catch (err: unknown) {
+      toast.error(err instanceof Error ? err.message : 'Failed to generate report');
+    } finally {
+      setLoading(false);
+    }
   };
 
   const handleExport = () => {
@@ -89,7 +78,7 @@ export default function SpareMasterSaleReportPage() {
   const totalQty = rows.reduce((s, r) => s + r.qtySold, 0);
 
   return (
-    <AppLayout title="Spare Master Sale Report" subtitle="View spare parts sold to customers from invoices">
+    <AppLayout title="Spare Master Sale Report" subtitle="View spare parts sold to customers from allotments">
       <div className="space-y-5">
         {/* Date Range Filter */}
         <div className="bg-card rounded-xl shadow-card p-5">
@@ -120,9 +109,10 @@ export default function SpareMasterSaleReportPage() {
             </div>
             <button
               onClick={handleSearch}
-              className="flex items-center gap-2 px-5 py-2 bg-primary text-primary-foreground rounded-lg text-[13px] font-semibold hover:bg-primary/90 transition-all active:scale-95"
+              disabled={loading}
+              className="flex items-center gap-2 px-5 py-2 bg-primary text-primary-foreground rounded-lg text-[13px] font-semibold hover:bg-primary/90 transition-all active:scale-95 disabled:opacity-60"
             >
-              <Search size={14} /> Generate Report
+              <Search size={14} /> {loading ? 'Generating…' : 'Generate Report'}
             </button>
             {rows.length > 0 && (
               <button
@@ -216,7 +206,7 @@ export default function SpareMasterSaleReportPage() {
           <div className="bg-card rounded-xl shadow-card p-12 text-center">
             <Calendar size={48} className="mx-auto text-muted-foreground/30 mb-4" />
             <p className="text-[14px] font-semibold text-muted-foreground">Select a date range and click Generate Report</p>
-            <p className="text-[12px] text-muted-foreground mt-1">Report will show all spare parts sold from invoices</p>
+            <p className="text-[12px] text-muted-foreground mt-1">Report will show all spare parts sold from allotments</p>
           </div>
         )}
       </div>

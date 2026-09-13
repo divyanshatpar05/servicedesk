@@ -1,22 +1,25 @@
 'use client';
-import React from 'react';
+import React, { useEffect, useState, useCallback } from 'react';
 import { BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, Cell, PieChart, Pie, Legend } from 'recharts';
+import { createClient } from '@/lib/supabase/client';
 
-const amcStatusData = [
-  { name: 'Active', value: 34, color: '#22c55e' },
-  { name: 'Upcoming', value: 18, color: '#3b82f6' },
-  { name: 'Completed', value: 27, color: '#8b5cf6' },
-  { name: 'Expired', value: 8, color: '#ef4444' },
-];
+interface AMCStatusEntry {
+  name: string;
+  value: number;
+  color: string;
+}
 
-const renewalMonthData = [
-  { month: 'Feb', renewals: 4 },
-  { month: 'Mar', renewals: 7 },
-  { month: 'Apr', renewals: 5 },
-  { month: 'May', renewals: 9 },
-  { month: 'Jun', renewals: 6 },
-  { month: 'Jul', renewals: 11 },
-];
+interface MonthEntry {
+  month: string;
+  renewals: number;
+}
+
+interface AMCRow {
+  amc_status: string;
+  end_date: string;
+}
+
+const MONTH_LABELS = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
 
 const CustomTooltip = ({ active, payload }: { active?: boolean; payload?: { name: string; value: number }[] }) => {
   if (!active || !payload?.[0]) return null;
@@ -29,6 +32,75 @@ const CustomTooltip = ({ active, payload }: { active?: boolean; payload?: { name
 };
 
 export default function AMCGraphs() {
+  const [amcStatusData, setAmcStatusData] = useState<AMCStatusEntry[]>([
+    { name: 'Active', value: 0, color: '#22c55e' },
+    { name: 'Upcoming', value: 0, color: '#3b82f6' },
+    { name: 'Completed', value: 0, color: '#8b5cf6' },
+    { name: 'Expired', value: 0, color: '#ef4444' },
+  ]);
+  const [renewalMonthData, setRenewalMonthData] = useState<MonthEntry[]>([]);
+
+  const fetchData = useCallback(async () => {
+    try {
+      const supabase = createClient();
+      const { data: amcList } = await supabase
+        .from('amc_renewals')
+        .select('amc_status, end_date');
+
+      if (!amcList) return;
+
+      const counts: Record<string, number> = { ACTIVE: 0, UPCOMING: 0, COMPLETED: 0, EXPIRED: 0 };
+      const monthCounts: Record<number, number> = {};
+
+      amcList.forEach((a: AMCRow) => {
+        const s = String(a.amc_status || '').toUpperCase();
+        if (s in counts) counts[s]++;
+
+        if (a.end_date) {
+          const month = new Date(a.end_date).getMonth();
+          monthCounts[month] = (monthCounts[month] || 0) + 1;
+        }
+      });
+
+      setAmcStatusData([
+        { name: 'Active', value: counts.ACTIVE, color: '#22c55e' },
+        { name: 'Upcoming', value: counts.UPCOMING, color: '#3b82f6' },
+        { name: 'Completed', value: counts.COMPLETED, color: '#8b5cf6' },
+        { name: 'Expired', value: counts.EXPIRED, color: '#ef4444' },
+      ]);
+
+      // Show last 6 months of renewal end dates
+      const now = new Date();
+      const last6: MonthEntry[] = [];
+      for (let i = 5; i >= 0; i--) {
+        const d = new Date(now.getFullYear(), now.getMonth() - i, 1);
+        last6.push({
+          month: MONTH_LABELS[d.getMonth()],
+          renewals: monthCounts[d.getMonth()] || 0,
+        });
+      }
+      setRenewalMonthData(last6);
+    } catch {
+      // keep previous data
+    }
+  }, []);
+
+  useEffect(() => {
+    fetchData();
+
+    const supabase = createClient();
+    const channel = supabase
+      .channel('realtime:amc_graphs:amc_renewals')
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'amc_renewals' }, () => {
+        fetchData();
+      })
+      .subscribe();
+
+    return () => {
+      supabase.removeChannel(channel);
+    };
+  }, [fetchData]);
+
   return (
     <div className="space-y-4">
       {/* AMC Status Summary */}

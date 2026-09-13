@@ -1,8 +1,9 @@
 'use client';
 import React, { useState, useRef } from 'react';
 import AppLayout from '@/components/AppLayout';
-import { Upload, FileSpreadsheet, CheckCircle2, AlertCircle, X, ChevronRight, Download, Users, Wrench, Package, RefreshCw } from 'lucide-react';
+import { Upload, FileSpreadsheet, CheckCircle2, AlertCircle, X, ChevronRight, Download, Users, Wrench, Package, RefreshCw, Loader2 } from 'lucide-react';
 import * as XLSX from 'xlsx';
+import { createClient } from '@/lib/supabase/client';
 
 type ImportType = 'customers' | 'dockets' | 'spare_parts' | 'amc';
 
@@ -19,19 +20,72 @@ const importConfigs: Record<ImportType, ImportConfig> = {
     label: 'Customers',
     icon: <Users size={18} />,
     color: 'bg-blue-100 text-blue-700 border-blue-200',
-    requiredColumns: ['Customer Name', 'Mobile No', 'Address', 'Pincode', 'Area', 'Email'],
+    requiredColumns: [
+      'SL. NO', 'DATE', 'CARD NO', 'CUSTOMER NAME', 'DETAILS ADDRESS',
+      'ZIP CODE', 'CONTACT NUMBER 1', 'CONTACT NUMBER 2', 'CONTACT NUMBER 3',
+      'SALE POINT', 'INVOICE NO', 'SERIAL NO PRODUCT',
+      'INSTALL DATE', 'INST. MONTH', 'EXP DATE', 'INSTALLER',
+      'CUR. SERV.', 'TOTAL SERVICE', 'NO OF SERVICE', 'NEXT SERVICE',
+      'OFFICE ATTENDED BY', 'AMC',
+    ],
     sampleData: [
-      { 'Customer Name': 'Priya Sharma', 'Mobile No': '9820145678', 'Address': '47 D.N.C RD KOL', 'Pincode': '700035', 'Area': 'Bandra West', 'Email': 'priya@example.com' },
-      { 'Customer Name': 'Rajesh Kumar', 'Mobile No': '9867432109', 'Address': '12 Park Street KOL', 'Pincode': '700016', 'Area': 'Park Street', 'Email': 'rajesh@example.com' },
+      {
+        'SL. NO': '1',
+        'DATE': '01/01/2026',
+        'CARD NO': 'CARD-001',
+        'CUSTOMER NAME': 'Priya Sharma',
+        'DETAILS ADDRESS': '47 D.N.C RD KOL',
+        'ZIP CODE': '700035',
+        'CONTACT NUMBER 1': '9820145678',
+        'CONTACT NUMBER 2': '8390200001',
+        'CONTACT NUMBER 3': '',
+        'SALE POINT': 'Bandra West',
+        'INVOICE NO': 'INV-2026-001',
+        'SERIAL NO PRODUCT': 'SN-001234',
+        'INSTALL DATE': '05/01/2026',
+        'INST. MONTH': 'January',
+        'EXP DATE': '05/01/2027',
+        'INSTALLER': 'Ramesh Kumar',
+        'CUR. SERV.': '1',
+        'TOTAL SERVICE': '4',
+        'NO OF SERVICE': '1',
+        'NEXT SERVICE': '05/04/2026',
+        'OFFICE ATTENDED BY': 'Suresh',
+        'AMC': 'YES',
+      },
+      {
+        'SL. NO': '2',
+        'DATE': '02/01/2026',
+        'CARD NO': 'CARD-002',
+        'CUSTOMER NAME': 'Rajesh Kumar',
+        'DETAILS ADDRESS': '12 Park Street KOL',
+        'ZIP CODE': '700016',
+        'CONTACT NUMBER 1': '9867432109',
+        'CONTACT NUMBER 2': '',
+        'CONTACT NUMBER 3': '',
+        'SALE POINT': 'Park Street',
+        'INVOICE NO': 'INV-2026-002',
+        'SERIAL NO PRODUCT': 'SN-005678',
+        'INSTALL DATE': '06/01/2026',
+        'INST. MONTH': 'January',
+        'EXP DATE': '06/01/2027',
+        'INSTALLER': 'Anil Verma',
+        'CUR. SERV.': '2',
+        'TOTAL SERVICE': '4',
+        'NO OF SERVICE': '2',
+        'NEXT SERVICE': '06/04/2026',
+        'OFFICE ATTENDED BY': 'Mohan',
+        'AMC': 'NO',
+      },
     ],
   },
   dockets: {
     label: 'Service Dockets',
     icon: <Wrench size={18} />,
     color: 'bg-orange-100 text-orange-700 border-orange-200',
-    requiredColumns: ['Docket No', 'Customer Name', 'Mobile No', 'Model', 'Nature of Docket', 'Status', 'Date/Time'],
+    requiredColumns: ['Docket No', 'Customer Name', 'Mobile No 1', 'Mobile No 2', 'Model', 'Nature of Docket', 'Status', 'Date'],
     sampleData: [
-      { 'Docket No': '100000001', 'Customer Name': 'Priya Sharma', 'Mobile No': '9820145678/8390200001', 'Model': 'VEGA DLX-60', 'Nature of Docket': 'AMC', 'Status': 'New', 'Date/Time': '01/01/2026 16:06' },
+      { 'Docket No': '100000001', 'Customer Name': 'Priya Sharma', 'Mobile No 1': '9820145678', 'Mobile No 2': '8390200001', 'Model': 'VEGA DLX-60', 'Nature of Docket': 'AMC', 'Status': 'New', 'Date': '01/01/2026' },
     ],
   },
   spare_parts: {
@@ -48,29 +102,82 @@ const importConfigs: Record<ImportType, ImportConfig> = {
     label: 'AMC Records',
     icon: <RefreshCw size={18} />,
     color: 'bg-green-100 text-green-700 border-green-200',
-    requiredColumns: ['AMC Ref No', 'Customer Name', 'Mobile No', 'Model', 'AMC Type', 'Start Date', 'End Date', 'Amount'],
+    requiredColumns: ['AMC Ref No', 'Customer Name', 'Mobile No 1', 'Mobile No 2', 'Mobile No 3', 'Model', 'AMC Type', 'Start Date', 'End Date', 'Amount'],
     sampleData: [
-      { 'AMC Ref No': 'AMC-2026-001', 'Customer Name': 'Priya Sharma', 'Mobile No': '9820145678', 'Model': 'VEGA DLX-60', 'AMC Type': '4 Month', 'Start Date': '2026-01-01', 'End Date': '2026-12-31', 'Amount': '3000' },
+      { 'AMC Ref No': 'AMC-2026-001', 'Customer Name': 'Priya Sharma', 'Mobile No 1': '9820145678', 'Mobile No 2': '', 'Mobile No 3': '', 'Model': 'VEGA DLX-60', 'AMC Type': '4 Month', 'Start Date': '2026-01-01', 'End Date': '2026-12-31', 'Amount': '3000' },
     ],
   },
 };
 
 // ── Transformation helpers ──────────────────────────────────────────────────
 
-/** Split a mobile string like "9000000001/8390200001/7000000003" into up to 3 parts */
-function splitMobileNumbers(value: string): { mobile1: string; mobile2: string; mobile3: string } {
-  const parts = (value || '').split('/').map(p => p.trim()).filter(Boolean);
-  return {
-    mobile1: parts[0] || '',
-    mobile2: parts[1] || '',
-    mobile3: parts[2] || '',
-  };
+/** Auto-convert short pincodes to full Kolkata pincodes.
+ *  e.g. 14 → 700014, 106 → 700106, 700014 → 700014 (unchanged) */
+function normalizeKolkataPincode(value: unknown): string {
+  const str = String(value ?? '').trim();
+  if (!str) return '';
+  // Already a full 6-digit pincode starting with 700
+  if (/^700\d{3}$/.test(str)) return str;
+  // Short pincode (1-3 digits) — pad to 3 digits then prefix 700
+  if (/^\d{1,3}$/.test(str)) {
+    return '700' + str.padStart(3, '0');
+  }
+  // Any other 6-digit pincode — return as-is
+  return str;
 }
 
-/** Split a date-time string like "01/01/2026 16:06" into date and time parts */
-function splitDateTime(value: string): { date: string; time: string } {
-  const str = (value || '').trim();
-  // Try splitting on the first space
+/** Transform a customer row: normalize ZIP CODE */
+function transformCustomerRow(
+  row: Record<string, string>,
+  mapping: Record<string, string>
+): Record<string, string> {
+  const get = (col: string) => {
+    const src = mapping[col];
+    return src ? String(row[src] ?? '').trim() : '';
+  };
+  const result: Record<string, string> = {};
+  // Copy all standard columns
+  [
+    'SL. NO', 'DATE', 'CARD NO', 'CUSTOMER NAME', 'DETAILS ADDRESS',
+    'SALE POINT', 'INVOICE NO', 'SERIAL NO PRODUCT',
+    'INSTALL DATE', 'INST. MONTH', 'EXP DATE', 'INSTALLER',
+    'CUR. SERV.', 'TOTAL SERVICE', 'NO OF SERVICE', 'NEXT SERVICE',
+    'OFFICE ATTENDED BY', 'AMC',
+    'CONTACT NUMBER 1', 'CONTACT NUMBER 2', 'CONTACT NUMBER 3',
+  ].forEach(col => { result[col] = get(col); });
+  // Normalized pincode
+  result['ZIP CODE'] = normalizeKolkataPincode(get('ZIP CODE'));
+  return result;
+}
+
+const CUSTOMER_DISPLAY_COLUMNS = [
+  'SL. NO', 'DATE', 'CARD NO', 'CUSTOMER NAME', 'DETAILS ADDRESS',
+  'ZIP CODE', 'CONTACT NUMBER 1', 'CONTACT NUMBER 2', 'CONTACT NUMBER 3',
+  'SALE POINT', 'INVOICE NO', 'SERIAL NO PRODUCT',
+  'INSTALL DATE', 'INST. MONTH', 'EXP DATE', 'INSTALLER',
+  'CUR. SERV.', 'TOTAL SERVICE', 'NO OF SERVICE', 'NEXT SERVICE',
+  'OFFICE ATTENDED BY', 'AMC',
+];
+
+function splitDateTime(value: unknown): { date: string; time: string } {
+  const str = String(value ?? '').trim();
+
+  // Detect Excel serial number: a number like 46054.51261574074
+  // Excel serial dates: integers 1-2958465 (year 1900 to 9999)
+  const excelSerial = Number(str);
+  if (!isNaN(excelSerial) && excelSerial > 1 && excelSerial < 2958466 && /^\d+(\.\d+)?$/.test(str)) {
+    // Excel epoch is Dec 30, 1899 (accounting for Excel's leap year bug)
+    const excelEpoch = new Date(1899, 11, 30); // Dec 30, 1899
+    const totalMs = excelEpoch.getTime() + excelSerial * 86400000;
+    const d = new Date(totalMs);
+    const day = String(d.getDate()).padStart(2, '0');
+    const month = String(d.getMonth() + 1).padStart(2, '0');
+    const year = d.getFullYear();
+    const hours = String(d.getHours()).padStart(2, '0');
+    const minutes = String(d.getMinutes()).padStart(2, '0');
+    return { date: `${day}/${month}/${year}`, time: `${hours}:${minutes}` };
+  }
+
   const spaceIdx = str.indexOf(' ');
   if (spaceIdx !== -1) {
     return { date: str.substring(0, spaceIdx).trim(), time: str.substring(spaceIdx + 1).trim() };
@@ -78,42 +185,68 @@ function splitDateTime(value: string): { date: string; time: string } {
   return { date: str, time: '' };
 }
 
-/** Apply docket-specific transformations to a raw row, expanding mobile & datetime columns */
+/** Map a UI status string to the DB docket_status enum */
+function mapStatusToDb(status: string): string {
+  const map: Record<string, string> = {
+    'new': 'PENDING',
+    'assigned': 'RUNNING',
+    'visited': 'RUNNING',
+    'diagnosed': 'RUNNING',
+    'in-repair': 'RUNNING',
+    'completed': 'COMPLETED',
+    'invoiced': 'COMPLETED',
+    'closed': 'COMPLETED',
+    'cancelled': 'CANCELLED',
+    'running': 'RUNNING',
+    'pending': 'PENDING',
+  };
+  return map[status.toLowerCase()] || 'PENDING';
+}
+
+/** Parse a date string like "01/01/2026" or "2026-01-01" into ISO format */
+function parseDate(dateStr: string): string | null {
+  if (!dateStr) return null;
+  // DD/MM/YYYY
+  const ddmmyyyy = dateStr.match(/^(\d{1,2})\/(\d{1,2})\/(\d{4})$/);
+  if (ddmmyyyy) {
+    return `${ddmmyyyy[3]}-${ddmmyyyy[2].padStart(2, '0')}-${ddmmyyyy[1].padStart(2, '0')}`;
+  }
+  // Already ISO
+  if (/^\d{4}-\d{2}-\d{2}/.test(dateStr)) return dateStr;
+  // Handle Excel serial numbers
+  const excelSerial = Number(dateStr);
+  if (!isNaN(excelSerial) && excelSerial > 1 && excelSerial < 2958466 && /^\d+(\.\d+)?$/.test(dateStr)) {
+    // Excel epoch is Dec 30, 1899 (accounting for Excel's leap year bug)
+    const excelEpoch = new Date(1899, 11, 30); // Dec 30, 1899
+    const totalMs = excelEpoch.getTime() + excelSerial * 86400000;
+    const d = new Date(totalMs);
+    const day = String(d.getDate()).padStart(2, '0');
+    const month = String(d.getMonth() + 1).padStart(2, '0');
+    const year = d.getFullYear();
+    return `${year}-${month}-${day}`;
+  }
+  return null;
+}
+
 function transformDocketRow(
   row: Record<string, string>,
   mapping: Record<string, string>
 ): Record<string, string> {
   const result: Record<string, string> = {};
-
-  // Standard columns (non-transformed)
-  const standardCols = ['Docket No', 'Customer Name', 'Model', 'Nature of Docket', 'Status'];
+  const standardCols = ['Docket No', 'Customer Name', 'Mobile No 1', 'Mobile No 2', 'Model', 'Nature of Docket', 'Status'];
   standardCols.forEach(col => {
     const src = mapping[col];
     result[col] = src ? (row[src] || '') : '';
   });
-
-  // Mobile split
-  const mobileSrc = mapping['Mobile No'];
-  const rawMobile = mobileSrc ? (row[mobileSrc] || '') : '';
-  const { mobile1, mobile2, mobile3 } = splitMobileNumbers(rawMobile);
-  result['Mobile 1'] = mobile1;
-  result['Mobile 2'] = mobile2;
-  result['Mobile 3'] = mobile3;
-
-  // Date/Time split
-  const dtSrc = mapping['Date/Time'];
-  const rawDT = dtSrc ? (row[dtSrc] || '') : '';
-  const { date, time } = splitDateTime(rawDT);
-  result['Date'] = date;
-  result['Time'] = time;
-
+  const dateSrc = mapping['Date'];
+  const rawDate = dateSrc ? (row[dateSrc] || '') : '';
+  result['Date'] = rawDate;
   return result;
 }
 
-// ── Derived preview columns for dockets ────────────────────────────────────
 const DOCKET_DISPLAY_COLUMNS = [
-  'Docket No', 'Customer Name', 'Mobile 1', 'Mobile 2', 'Mobile 3',
-  'Model', 'Nature of Docket', 'Status', 'Date', 'Time',
+  'Docket No', 'Customer Name', 'Mobile No 1', 'Mobile No 2', 'Mobile No 3',
+  'Model', 'Nature of Docket', 'Status', 'Date',
 ];
 
 type ImportStep = 'select' | 'upload' | 'map' | 'preview' | 'done';
@@ -126,6 +259,7 @@ export default function BulkImportPage() {
   const [columnMapping, setColumnMapping] = useState<Record<string, string>>({});
   const [fileName, setFileName] = useState('');
   const [importResult, setImportResult] = useState<{ success: number; errors: string[] } | null>(null);
+  const [importing, setImporting] = useState(false);
   const fileRef = useRef<HTMLInputElement>(null);
 
   const config = selectedType ? importConfigs[selectedType] : null;
@@ -137,14 +271,13 @@ export default function BulkImportPage() {
     const reader = new FileReader();
     reader.onload = (evt) => {
       const data = evt.target?.result;
-      const wb = XLSX.read(data, { type: 'binary' });
+      const wb = XLSX.read(data, { type: 'binary', cellDates: false, raw: true });
       const ws = wb.Sheets[wb.SheetNames[0]];
       const json = XLSX.utils.sheet_to_json<Record<string, string>>(ws, { defval: '' });
       if (json.length > 0) {
         const cols = Object.keys(json[0]);
         setUploadedColumns(cols);
         setUploadedData(json);
-        // Auto-map columns with same name
         const autoMap: Record<string, string> = {};
         config?.requiredColumns.forEach(req => {
           const match = cols.find(c => c.toLowerCase().trim() === req.toLowerCase().trim());
@@ -165,36 +298,198 @@ export default function BulkImportPage() {
     XLSX.writeFile(wb, `sample-${selectedType}.xlsx`);
   };
 
-  const handleImport = () => {
+  const handleImport = async () => {
+    setImporting(true);
     const errors: string[] = [];
     let success = 0;
-    uploadedData.forEach((row, idx) => {
+
+    try {
+      const supabase = createClient();
+      const { data: { user } } = await supabase.auth.getUser();
+      const userId = user?.id || null;
+
       if (selectedType === 'dockets') {
-        // For dockets, validate using transformed row
-        const transformed = transformDocketRow(row, columnMapping);
-        const missing: string[] = [];
-        if (!transformed['Docket No']) missing.push('Docket No');
-        if (!transformed['Customer Name']) missing.push('Customer Name');
-        if (!transformed['Mobile 1']) missing.push('Mobile No');
-        if (!transformed['Model']) missing.push('Model');
-        if (!transformed['Date']) missing.push('Date/Time');
-        if (missing.length > 0) {
-          errors.push(`Row ${idx + 2}: Missing ${missing.join(', ')}`);
-        } else {
-          success++;
-        }
-      } else {
-        const missing = config?.requiredColumns.filter(req => {
-          const mapped = columnMapping[req];
-          return !mapped || !row[mapped];
+        // Build rows to insert, skipping invalid ones
+        const toInsert: Record<string, unknown>[] = [];
+
+        uploadedData.forEach((row, idx) => {
+          const transformed = transformDocketRow(row, columnMapping);
+          const missing: string[] = [];
+          if (!transformed['Docket No']) missing.push('Docket No');
+          if (!transformed['Customer Name']) missing.push('Customer Name');
+          if (!transformed['Mobile No 1']) missing.push('Mobile No 1');
+          if (!transformed['Model']) missing.push('Model');
+          if (!transformed['Date']) missing.push('Date');
+
+          if (missing.length > 0) {
+            errors.push(`Row ${idx + 2}: Missing ${missing.join(', ')}`);
+            return;
+          }
+
+          // transformed['Date'] is already in DD/MM/YYYY from transformDocketRow, parse to ISO
+          const isoDate = parseDate(transformed['Date']);
+
+          toInsert.push({
+            user_id: userId,
+            docket_number: String(transformed['Docket No']).trim(),
+            customer_name: transformed['Customer Name'],
+            mobile_number: transformed['Mobile No 1'],
+            alternate_mobile: transformed['Mobile No 2'] || null,
+            model_no: transformed['Model'],
+            nature_of_docket: transformed['Nature of Docket'] || null,
+            docket_status: mapStatusToDb(transformed['Status'] || 'New'),
+            docket_date: isoDate || null,
+          });
         });
-        if (missing && missing.length > 0) {
-          errors.push(`Row ${idx + 2}: Missing ${missing.join(', ')}`);
-        } else {
-          success++;
+
+        // Insert in batches of 100 to avoid payload limits
+        const BATCH = 100;
+        for (let i = 0; i < toInsert.length; i += BATCH) {
+          const batch = toInsert.slice(i, i + BATCH);
+          const { error } = await supabase
+            .from('service_dockets')
+            .upsert(batch, { onConflict: 'docket_number', ignoreDuplicates: true });
+          if (error) {
+            errors.push(`Batch ${Math.floor(i / BATCH) + 1} error: ${error.message}`);
+          } else {
+            success += batch.length;
+          }
+        }
+
+      } else if (selectedType === 'customers') {
+        const toInsert: Record<string, unknown>[] = [];
+
+        uploadedData.forEach((row, idx) => {
+          const transformed = transformCustomerRow(row, columnMapping);
+          const name = transformed['CUSTOMER NAME'];
+          if (!name) {
+            errors.push(`Row ${idx + 2}: Missing CUSTOMER NAME`);
+            return;
+          }
+          const installDateIso = parseDate(transformed['INSTALL DATE']);
+          const expDateIso = parseDate(transformed['EXP DATE']);
+          const nextServiceIso = parseDate(transformed['NEXT SERVICE']);
+          const dateIso = parseDate(transformed['DATE']);
+          toInsert.push({
+            user_id: userId,
+            customer_name: name,
+            mobile_number: transformed['CONTACT NUMBER 1'] || null,
+            alternate_mobile: transformed['CONTACT NUMBER 2'] || null,
+            mobile_number_3: transformed['CONTACT NUMBER 3'] || null,
+            address: transformed['DETAILS ADDRESS'] || null,
+            zipcode: transformed['ZIP CODE'] || null,
+            area: transformed['SALE POINT'] || null,
+            card_no: transformed['CARD NO'] || null,
+            invoice_no: transformed['INVOICE NO'] || null,
+            serial_no_product: transformed['SERIAL NO PRODUCT'] || null,
+            install_date: installDateIso || null,
+            inst_month: transformed['INST. MONTH'] || null,
+            exp_date: expDateIso || null,
+            installer: transformed['INSTALLER'] || null,
+            cur_serv: transformed['CUR. SERV.'] || null,
+            total_service: transformed['TOTAL SERVICE'] || null,
+            no_of_service: transformed['NO OF SERVICE'] || null,
+            next_service: nextServiceIso || null,
+            office_attended_by: transformed['OFFICE ATTENDED BY'] || null,
+            amc: transformed['AMC'] || null,
+            sl_no: transformed['SL. NO'] || null,
+            entry_date: dateIso || null,
+          });
+        });
+
+        const BATCH = 100;
+        for (let i = 0; i < toInsert.length; i += BATCH) {
+          const batch = toInsert.slice(i, i + BATCH);
+          const { error } = await supabase.from('customers').insert(batch);
+          if (error) {
+            errors.push(`Batch ${Math.floor(i / BATCH) + 1} error: ${error.message}`);
+          } else {
+            success += batch.length;
+          }
+        }
+
+      } else if (selectedType === 'amc') {
+        const toInsert: Record<string, unknown>[] = [];
+
+        uploadedData.forEach((row, idx) => {
+          const get = (col: string) => {
+            const src = columnMapping[col];
+            return src ? String(row[src] ?? '').trim() : '';
+          };
+          const name = get('Customer Name');
+          const mobile = get('Mobile No 1');
+          if (!name || !mobile) {
+            errors.push(`Row ${idx + 2}: Missing Customer Name or Mobile No 1`);
+            return;
+          }
+          const startIso = parseDate(get('Start Date'));
+          const endIso = parseDate(get('End Date'));
+          toInsert.push({
+            user_id: userId,
+            customer_name: name,
+            mobile_number: mobile,
+            alternate_mobile: get('Mobile No 2') || null,
+            model: get('Model') || null,
+            amc_type: get('AMC Type') || null,
+            amc_status: 'ACTIVE',
+            start_date: startIso ? new Date(startIso).toISOString() : new Date().toISOString(),
+            end_date: endIso ? new Date(endIso).toISOString() : null,
+            notes: get('AMC Ref No') ? `Ref: ${get('AMC Ref No')}` : null,
+          });
+        });
+
+        const BATCH = 100;
+        for (let i = 0; i < toInsert.length; i += BATCH) {
+          const batch = toInsert.slice(i, i + BATCH);
+          const { error } = await supabase.from('amc_renewals').insert(batch);
+          if (error) {
+            errors.push(`Batch ${Math.floor(i / BATCH) + 1} error: ${error.message}`);
+          } else {
+            success += batch.length;
+          }
+        }
+
+      } else if (selectedType === 'spare_parts') {
+        // Spare parts go into master_setup with category = 'spare_part'
+        const toInsert: Record<string, unknown>[] = [];
+
+        uploadedData.forEach((row, idx) => {
+          const get = (col: string) => {
+            const src = columnMapping[col];
+            return src ? String(row[src] ?? '').trim() : '';
+          };
+          const partName = get('Part Name');
+          if (!partName) {
+            errors.push(`Row ${idx + 2}: Missing Part Name`);
+            return;
+          }
+          toInsert.push({
+            user_id: userId,
+            category: 'spare_part',
+            value: partName,
+            spare_amount: parseFloat(get('Rate')) || 0,
+            is_active: true,
+          });
+        });
+
+        const BATCH = 100;
+        for (let i = 0; i < toInsert.length; i += BATCH) {
+          const batch = toInsert.slice(i, i + BATCH);
+          const { error } = await supabase.from('master_setup').insert(batch);
+          if (error) {
+            errors.push(`Batch ${Math.floor(i / BATCH) + 1} error: ${error.message}`);
+          } else {
+            success += batch.length;
+          }
         }
       }
-    });
+    } catch (err: unknown) {
+      const msg = err instanceof Error ? err.message : 'Unexpected error during import';
+      errors.push(msg);
+    } finally {
+      setImporting(false);
+    }
+
     setImportResult({ success, errors: errors.slice(0, 10) });
     setStep('done');
   };
@@ -214,6 +509,9 @@ export default function BulkImportPage() {
     if (selectedType === 'dockets') {
       return transformDocketRow(row, columnMapping);
     }
+    if (selectedType === 'customers') {
+      return transformCustomerRow(row, columnMapping);
+    }
     const mapped: Record<string, string> = {};
     config?.requiredColumns.forEach(req => {
       const col = columnMapping[req];
@@ -222,8 +520,11 @@ export default function BulkImportPage() {
     return mapped;
   });
 
-  // Columns to show in preview table
-  const previewColumns = selectedType === 'dockets' ? DOCKET_DISPLAY_COLUMNS : (config?.requiredColumns || []);
+  const previewColumns = selectedType === 'dockets'
+    ? DOCKET_DISPLAY_COLUMNS
+    : selectedType === 'customers'
+      ? CUSTOMER_DISPLAY_COLUMNS
+      : (config?.requiredColumns || []);
 
   return (
     <AppLayout title="Bulk Data Import" subtitle="Import customers, dockets, spare parts, and AMC records from Excel/CSV">
@@ -367,7 +668,16 @@ export default function BulkImportPage() {
               <div className="bg-amber-50 border border-amber-200 rounded-lg px-4 py-3 text-[12px] text-amber-800 flex items-start gap-2">
                 <AlertCircle size={14} className="mt-0.5 flex-shrink-0 text-amber-500" />
                 <span>
-                  <strong>Auto-transformations applied:</strong> Mobile numbers separated by <code className="bg-amber-100 px-1 rounded">/</code> are split into <strong>Mobile 1 / 2 / 3</strong>. Date-time values like <code className="bg-amber-100 px-1 rounded">01/01/2026 16:06</code> are split into separate <strong>Date</strong> and <strong>Time</strong> columns.
+                  <strong>Auto-transformations applied:</strong> Date-time values like <code className="bg-amber-100 px-1 rounded">01/01/2026 16:06</code> are split into separate <strong>Date</strong> and <strong>Time</strong> columns.
+                </span>
+              </div>
+            )}
+
+            {selectedType === 'customers' && (
+              <div className="bg-amber-50 border border-amber-200 rounded-lg px-4 py-3 text-[12px] text-amber-800 flex items-start gap-2">
+                <AlertCircle size={14} className="mt-0.5 flex-shrink-0 text-amber-500" />
+                <span>
+                  <strong>Auto-transformations applied:</strong> Short pincodes like <code className="bg-amber-100 px-1 rounded">14</code> are auto-expanded to full Kolkata pincodes (e.g. <strong>700014</strong>).
                 </span>
               </div>
             )}
@@ -394,12 +704,17 @@ export default function BulkImportPage() {
             </div>
 
             <div className="flex gap-3 pt-2">
-              <button onClick={() => setStep('map')} className="px-4 py-2 border border-border rounded-lg text-[13px] font-semibold text-muted-foreground hover:bg-secondary transition-colors">Back</button>
+              <button onClick={() => setStep('map')} disabled={importing} className="px-4 py-2 border border-border rounded-lg text-[13px] font-semibold text-muted-foreground hover:bg-secondary transition-colors disabled:opacity-50">Back</button>
               <button
                 onClick={handleImport}
-                className="px-6 py-2 bg-green-600 text-white rounded-lg text-[13px] font-bold hover:bg-green-700 transition-colors flex items-center gap-2"
+                disabled={importing}
+                className="px-6 py-2 bg-green-600 text-white rounded-lg text-[13px] font-bold hover:bg-green-700 transition-colors flex items-center gap-2 disabled:opacity-60 disabled:cursor-not-allowed"
               >
-                <Upload size={14} /> Import {uploadedData.length} Records
+                {importing ? (
+                  <><Loader2 size={14} className="animate-spin" /> Importing…</>
+                ) : (
+                  <><Upload size={14} /> Import {uploadedData.length} Records</>
+                )}
               </button>
             </div>
           </div>
@@ -412,7 +727,7 @@ export default function BulkImportPage() {
               <CheckCircle2 size={48} className="mx-auto text-green-500 mb-3" />
               <h2 className="text-[18px] font-bold text-foreground">Import Complete</h2>
               <p className="text-[13px] text-muted-foreground mt-1">
-                <strong className="text-green-600">{importResult.success} records</strong> imported successfully
+                <strong className="text-green-600">{importResult.success} records</strong> saved to database
                 {importResult.errors.length > 0 && <>, <strong className="text-red-500">{importResult.errors.length} errors</strong></>}
               </p>
             </div>

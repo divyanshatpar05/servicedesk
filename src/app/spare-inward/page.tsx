@@ -1,8 +1,10 @@
 'use client';
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useCallback } from 'react';
 import AppLayout from '@/components/AppLayout';
-import { Plus, Trash2, X, Package, Download } from 'lucide-react';
+import { Plus, Trash2, X, Package, Download, Loader2, AlertTriangle } from 'lucide-react';
 import * as XLSX from 'xlsx';
+import { createClient } from '@/lib/supabase/client';
+import { toast } from 'sonner';
 
 interface SpareInwardItem {
   id: string;
@@ -24,37 +26,23 @@ interface SpareInwardRecord {
   createdAt: string;
 }
 
-const STORAGE_KEY_INWARD = 'spareInwardRecords';
-const STORAGE_KEY_MASTER = 'masterSetupData';
+function getTodayDate(): string {
+  return new Date().toISOString().split('T')[0];
+}
+
+function getCurrentTime(): string {
+  return new Date().toTimeString().slice(0, 5);
+}
 
 function getNextRefNo(records: SpareInwardRecord[]): number {
   if (records.length === 0) return 249;
   return Math.max(...records.map(r => r.refNo)) + 1;
 }
 
-function getSpareNames(): string[] {
-  try {
-    const stored = localStorage.getItem(STORAGE_KEY_MASTER);
-    if (stored) {
-      const parsed = JSON.parse(stored);
-      return (parsed.spareNames || []).map((s: { value: string }) => s.value);
-    }
-  } catch { }
-  return ['Filter', 'Motor', 'PCB Board', 'Compressor', 'Fan Blade', 'Capacitor', 'Thermostat', 'Pump', 'Valve', 'Seal Kit'];
-}
-
-function getTodayDate(): string {
-  const d = new Date();
-  return d.toISOString().split('T')[0];
-}
-
-function getCurrentTime(): string {
-  const d = new Date();
-  return d.toTimeString().slice(0, 5);
-}
-
 export default function SpareInwardPage() {
   const [records, setRecords] = useState<SpareInwardRecord[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
   const [showForm, setShowForm] = useState(false);
   const [adjustmentNote, setAdjustmentNote] = useState('');
   const [refNo, setRefNo] = useState(249);
@@ -65,13 +53,57 @@ export default function SpareInwardPage() {
   ]);
   const [spareNames, setSpareNames] = useState<string[]>([]);
 
-  useEffect(() => {
+  const fetchRecords = useCallback(async () => {
+    setLoading(true);
+    setError(null);
     try {
-      const stored = localStorage.getItem(STORAGE_KEY_INWARD);
-      if (stored) setRecords(JSON.parse(stored));
-    } catch { }
-    setSpareNames(getSpareNames());
+      const supabase = createClient();
+      const { data: inwards, error: inwardError } = await supabase
+        .from('spare_inward')
+        .select('*, spare_inward_items(*)')
+        .order('inward_date', { ascending: false });
+      if (inwardError) throw inwardError;
+
+      // Fetch spare names from master_setup
+      const { data: masterData } = await supabase
+        .from('master_setup')
+        .select('value')
+        .eq('category', 'spareNames');
+      if (masterData && masterData.length > 0) {
+        setSpareNames(masterData.map((m: { value: string }) => m.value));
+      }
+
+      const mapped: SpareInwardRecord[] = (inwards || []).map((r: Record<string, unknown>) => {
+        const rawItems = (r.spare_inward_items as Record<string, unknown>[] || []);
+        return {
+          id: String(r.id),
+          refNo: Number(r.ref_no),
+          adjustmentNote: String(r.adjustment_note || ''),
+          date: String(r.inward_date || ''),
+          time: String(r.inward_time || '').slice(0, 5),
+          spareTotal: Number(r.spare_total || 0),
+          createdAt: String(r.created_at || ''),
+          items: rawItems.map((item, idx) => ({
+            id: String(item.id),
+            slNo: Number(item.sl_no || idx + 1),
+            spareName: String(item.spare_name || ''),
+            qty: Number(item.qty || 0),
+            rate: Number(item.rate || 0),
+            total: Number(item.total || 0),
+          })),
+        };
+      });
+      setRecords(mapped);
+    } catch (err: unknown) {
+      const msg = err instanceof Error ? err.message : 'Failed to load spare inward records';
+      setError(msg);
+      toast.error(msg);
+    } finally {
+      setLoading(false);
+    }
   }, []);
+
+  useEffect(() => { fetchRecords(); }, [fetchRecords]);
 
   useEffect(() => {
     if (showForm) {
@@ -104,24 +136,46 @@ export default function SpareInwardPage() {
   };
 
   const spareTotal = items.reduce((sum, i) => sum + i.total, 0);
-  const totalQty = items.reduce((sum, i) => sum + i.qty, 0);
 
-  const handleSave = () => {
-    const record: SpareInwardRecord = {
-      id: Date.now().toString(),
-      refNo,
-      adjustmentNote,
-      date,
-      time,
-      items: items.filter(i => i.spareName),
-      spareTotal,
-      createdAt: new Date().toISOString(),
-    };
-    const updated = [...records, record];
-    setRecords(updated);
-    try { localStorage.setItem(STORAGE_KEY_INWARD, JSON.stringify(updated)); } catch { }
-    setShowForm(false);
-    resetForm();
+  const handleSave = async () => {
+    const validItems = items.filter(i => i.spareName);
+    if (validItems.length === 0) {
+      toast.error('Please add at least one spare item');
+      return;
+    }
+    try {
+      const supabase = createClient();
+      const { data: inwardData, error: inwardError } = await supabase
+        .from('spare_inward')
+        .insert({
+          ref_no: refNo,
+          adjustment_note: adjustmentNote,
+          inward_date: date,
+          inward_time: time,
+          spare_total: spareTotal,
+        })
+        .select()
+        .single();
+      if (inwardError) throw inwardError;
+
+      const itemsToInsert = validItems.map((item, idx) => ({
+        inward_id: inwardData.id,
+        sl_no: idx + 1,
+        spare_name: item.spareName,
+        qty: item.qty,
+        rate: item.rate,
+        total: item.total,
+      }));
+      const { error: itemsError } = await supabase.from('spare_inward_items').insert(itemsToInsert);
+      if (itemsError) throw itemsError;
+
+      toast.success('Spare inward record saved');
+      setShowForm(false);
+      resetForm();
+      fetchRecords();
+    } catch (err: unknown) {
+      toast.error(err instanceof Error ? err.message : 'Save failed');
+    }
   };
 
   const resetForm = () => {
@@ -129,10 +183,16 @@ export default function SpareInwardPage() {
     setItems([{ id: '1', slNo: 1, spareName: '', qty: 0, rate: 0, total: 0 }]);
   };
 
-  const handleDelete = (id: string) => {
-    const updated = records.filter(r => r.id !== id);
-    setRecords(updated);
-    try { localStorage.setItem(STORAGE_KEY_INWARD, JSON.stringify(updated)); } catch { }
+  const handleDelete = async (id: string) => {
+    try {
+      const supabase = createClient();
+      const { error: delError } = await supabase.from('spare_inward').delete().eq('id', id);
+      if (delError) throw delError;
+      setRecords(prev => prev.filter(r => r.id !== id));
+      toast.success('Record deleted');
+    } catch (err: unknown) {
+      toast.error(err instanceof Error ? err.message : 'Delete failed');
+    }
   };
 
   const handleExport = () => {
@@ -164,7 +224,9 @@ export default function SpareInwardPage() {
         <div className="flex items-center justify-between">
           <div className="flex items-center gap-2">
             <Package size={20} className="text-primary" />
-            <span className="text-[14px] font-semibold text-foreground">{records.length} Inward Records</span>
+            <span className="text-[14px] font-semibold text-foreground">
+              {loading ? 'Loading…' : `${records.length} Inward Records`}
+            </span>
           </div>
           <div className="flex items-center gap-2">
             {records.length > 0 && (
@@ -186,42 +248,55 @@ export default function SpareInwardPage() {
 
         {/* Records Table */}
         <div className="bg-card rounded-xl shadow-card overflow-hidden">
-          <table className="w-full text-[13px]">
-            <thead>
-              <tr className="bg-muted/50 border-b border-border">
-                <th className="text-left px-4 py-3 font-semibold text-muted-foreground">Ref No</th>
-                <th className="text-left px-4 py-3 font-semibold text-muted-foreground">Date & Time</th>
-                <th className="text-left px-4 py-3 font-semibold text-muted-foreground">Adjustment Note</th>
-                <th className="text-right px-4 py-3 font-semibold text-muted-foreground">Items</th>
-                <th className="text-right px-4 py-3 font-semibold text-muted-foreground">Total (₹)</th>
-                <th className="text-center px-4 py-3 font-semibold text-muted-foreground">Action</th>
-              </tr>
-            </thead>
-            <tbody>
-              {records.length === 0 ? (
-                <tr>
-                  <td colSpan={6} className="text-center py-12 text-muted-foreground">
-                    No inward records yet. Click "New Inward Entry" to add stock.
-                  </td>
+          {loading ? (
+            <div className="flex flex-col items-center justify-center py-12 gap-3">
+              <Loader2 size={28} className="text-primary animate-spin" />
+              <p className="text-[13px] text-muted-foreground">Loading from database…</p>
+            </div>
+          ) : error ? (
+            <div className="flex flex-col items-center justify-center py-12 gap-3">
+              <AlertTriangle size={28} className="text-danger" />
+              <p className="text-[13px] text-danger">{error}</p>
+              <button onClick={fetchRecords} className="px-4 py-2 bg-primary text-primary-foreground rounded text-[12px]">Retry</button>
+            </div>
+          ) : (
+            <table className="w-full text-[13px]">
+              <thead>
+                <tr className="bg-muted/50 border-b border-border">
+                  <th className="text-left px-4 py-3 font-semibold text-muted-foreground">Ref No</th>
+                  <th className="text-left px-4 py-3 font-semibold text-muted-foreground">Date & Time</th>
+                  <th className="text-left px-4 py-3 font-semibold text-muted-foreground">Adjustment Note</th>
+                  <th className="text-right px-4 py-3 font-semibold text-muted-foreground">Items</th>
+                  <th className="text-right px-4 py-3 font-semibold text-muted-foreground">Total (₹)</th>
+                  <th className="text-center px-4 py-3 font-semibold text-muted-foreground">Action</th>
                 </tr>
-              ) : (
-                records.map(r => (
-                  <tr key={r.id} className="border-b border-border hover:bg-muted/20 transition-colors">
-                    <td className="px-4 py-3 font-mono font-bold text-primary">{r.refNo}</td>
-                    <td className="px-4 py-3 text-muted-foreground">{r.date} {r.time}</td>
-                    <td className="px-4 py-3">{r.adjustmentNote || '—'}</td>
-                    <td className="px-4 py-3 text-right">{r.items.length}</td>
-                    <td className="px-4 py-3 text-right font-semibold">₹{r.spareTotal.toFixed(2)}</td>
-                    <td className="px-4 py-3 text-center">
-                      <button onClick={() => handleDelete(r.id)} className="text-danger hover:text-danger/80 transition-colors">
-                        <Trash2 size={14} />
-                      </button>
+              </thead>
+              <tbody>
+                {records.length === 0 ? (
+                  <tr>
+                    <td colSpan={6} className="text-center py-12 text-muted-foreground">
+                      No inward records yet. Click &quot;New Inward Entry&quot; to add stock.
                     </td>
                   </tr>
-                ))
-              )}
-            </tbody>
-          </table>
+                ) : (
+                  records.map(r => (
+                    <tr key={r.id} className="border-b border-border hover:bg-muted/20 transition-colors">
+                      <td className="px-4 py-3 font-mono font-bold text-primary">{r.refNo}</td>
+                      <td className="px-4 py-3 text-muted-foreground">{r.date} {r.time}</td>
+                      <td className="px-4 py-3">{r.adjustmentNote || '—'}</td>
+                      <td className="px-4 py-3 text-right">{r.items.length}</td>
+                      <td className="px-4 py-3 text-right font-semibold">₹{r.spareTotal.toFixed(2)}</td>
+                      <td className="px-4 py-3 text-center">
+                        <button onClick={() => handleDelete(r.id)} className="text-danger hover:text-danger/80 transition-colors">
+                          <Trash2 size={14} />
+                        </button>
+                      </td>
+                    </tr>
+                  ))
+                )}
+              </tbody>
+            </table>
+          )}
         </div>
       </div>
 
@@ -250,125 +325,99 @@ export default function SpareInwardPage() {
                     placeholder="Enter adjustment note"
                   />
                 </div>
-                <div className="flex items-end gap-3">
+                <div className="flex gap-4">
                   <div>
-                    <label className="block text-[13px] font-bold text-foreground mb-1.5">Ref No & Date</label>
-                    <div className="flex gap-2">
-                      <input
-                        type="number"
-                        value={refNo}
-                        readOnly
-                        className="w-20 px-3 py-2.5 border border-border rounded text-[13px] bg-gray-50 font-mono font-bold"
-                      />
-                      <input
-                        type="date"
-                        value={date}
-                        onChange={e => setDate(e.target.value)}
-                        className="px-3 py-2.5 border border-border rounded text-[13px] focus:outline-none focus:ring-2 focus:ring-ring"
-                      />
-                      <input
-                        type="time"
-                        value={time}
-                        onChange={e => setTime(e.target.value)}
-                        className="px-3 py-2.5 border border-border rounded text-[13px] focus:outline-none focus:ring-2 focus:ring-ring"
-                      />
-                    </div>
+                    <label className="block text-[13px] font-bold text-foreground mb-1.5">Ref No</label>
+                    <input type="number" value={refNo} onChange={e => setRefNo(Number(e.target.value))} className="w-24 px-3 py-2.5 border-2 border-gray-300 rounded text-[13px] font-mono font-bold focus:outline-none" />
+                  </div>
+                  <div>
+                    <label className="block text-[13px] font-bold text-foreground mb-1.5">Date</label>
+                    <input type="date" value={date} onChange={e => setDate(e.target.value)} className="px-3 py-2.5 border-2 border-gray-300 rounded text-[13px] focus:outline-none" />
+                  </div>
+                  <div>
+                    <label className="block text-[13px] font-bold text-foreground mb-1.5">Time</label>
+                    <input type="time" value={time} onChange={e => setTime(e.target.value)} className="px-3 py-2.5 border-2 border-gray-300 rounded text-[13px] focus:outline-none" />
                   </div>
                 </div>
               </div>
 
               {/* Items Table */}
-              <div className="border border-green-400 rounded overflow-hidden mb-4">
+              <div className="border border-gray-300 rounded overflow-hidden mb-4">
                 <table className="w-full text-[13px]">
                   <thead>
-                    <tr className="bg-gray-300">
-                      <th className="text-left px-3 py-2.5 font-bold border-r border-green-400 w-16">Sl No</th>
-                      <th className="text-left px-3 py-2.5 font-bold border-r border-green-400">Spares And Accessories</th>
-                      <th className="text-center px-3 py-2.5 font-bold border-r border-green-400 w-24">Qty</th>
-                      <th className="text-center px-3 py-2.5 font-bold border-r border-green-400 w-28">Rate</th>
-                      <th className="text-center px-3 py-2.5 font-bold border-r border-green-400 w-28">Total</th>
-                      <th className="text-center px-3 py-2.5 font-bold bg-[#c0392b] text-white w-20">Action</th>
+                    <tr className="bg-gray-100 border-b border-gray-300">
+                      <th className="text-center px-3 py-2 font-semibold w-12">Sl</th>
+                      <th className="text-left px-3 py-2 font-semibold">Spare Name</th>
+                      <th className="text-center px-3 py-2 font-semibold w-24">Qty</th>
+                      <th className="text-center px-3 py-2 font-semibold w-28">Rate (₹)</th>
+                      <th className="text-center px-3 py-2 font-semibold w-28">Total (₹)</th>
+                      <th className="text-center px-3 py-2 font-semibold w-10"></th>
                     </tr>
                   </thead>
                   <tbody>
                     {items.map(item => (
-                      <tr key={item.id} className="border-t border-green-400">
-                        <td className="px-3 py-2 border-r border-green-400 text-center text-muted-foreground">{item.slNo}.</td>
-                        <td className="px-3 py-2 border-r border-green-400">
-                          <select
-                            value={item.spareName}
-                            onChange={e => updateItem(item.id, 'spareName', e.target.value)}
-                            className="w-full bg-transparent text-[13px] focus:outline-none"
-                          >
-                            <option value="">Enter Spare Name</option>
-                            {spareNames.map(n => <option key={n} value={n}>{n}</option>)}
-                          </select>
+                      <tr key={item.id} className="border-b border-gray-200">
+                        <td className="px-3 py-2 text-center text-muted-foreground">{item.slNo}</td>
+                        <td className="px-3 py-2">
+                          {spareNames.length > 0 ? (
+                            <select
+                              value={item.spareName}
+                              onChange={e => updateItem(item.id, 'spareName', e.target.value)}
+                              className="w-full px-2 py-1.5 border border-gray-300 rounded text-[12px] focus:outline-none focus:ring-1 focus:ring-primary"
+                            >
+                              <option value="">-- Select Spare --</option>
+                              {spareNames.map(n => <option key={n} value={n}>{n}</option>)}
+                            </select>
+                          ) : (
+                            <input
+                              type="text"
+                              value={item.spareName}
+                              onChange={e => updateItem(item.id, 'spareName', e.target.value)}
+                              className="w-full px-2 py-1.5 border border-gray-300 rounded text-[12px] focus:outline-none focus:ring-1 focus:ring-primary"
+                              placeholder="Spare name"
+                            />
+                          )}
                         </td>
-                        <td className="px-3 py-2 border-r border-green-400">
-                          <input
-                            type="number"
-                            value={item.qty || ''}
-                            onChange={e => updateItem(item.id, 'qty', parseFloat(e.target.value) || 0)}
-                            className="w-full text-center bg-transparent text-[13px] focus:outline-none"
-                            placeholder="0"
-                          />
+                        <td className="px-3 py-2">
+                          <input type="number" value={item.qty} onChange={e => updateItem(item.id, 'qty', parseFloat(e.target.value) || 0)} className="w-full px-2 py-1.5 border border-gray-300 rounded text-[12px] text-center focus:outline-none focus:ring-1 focus:ring-primary" min="0" step="0.01" />
                         </td>
-                        <td className="px-3 py-2 border-r border-green-400">
-                          <input
-                            type="number"
-                            value={item.rate || ''}
-                            onChange={e => updateItem(item.id, 'rate', parseFloat(e.target.value) || 0)}
-                            className="w-full text-center bg-blue-50 text-[13px] focus:outline-none"
-                            placeholder="0.00"
-                          />
+                        <td className="px-3 py-2">
+                          <input type="number" value={item.rate} onChange={e => updateItem(item.id, 'rate', parseFloat(e.target.value) || 0)} className="w-full px-2 py-1.5 border border-gray-300 rounded text-[12px] text-center focus:outline-none focus:ring-1 focus:ring-primary" min="0" step="0.01" />
                         </td>
-                        <td className="px-3 py-2 border-r border-green-400 text-center bg-blue-50 font-medium">
-                          {item.total.toFixed(2)}
-                        </td>
+                        <td className="px-3 py-2 text-center font-semibold text-green-700">₹{item.total.toFixed(2)}</td>
                         <td className="px-3 py-2 text-center">
-                          <input
-                            type="checkbox"
-                            onChange={() => removeRow(item.id)}
-                            className="w-4 h-4 cursor-pointer"
-                            title="Remove row"
-                          />
+                          {items.length > 1 && (
+                            <button onClick={() => removeRow(item.id)} className="text-danger hover:text-danger/80">
+                              <X size={14} />
+                            </button>
+                          )}
                         </td>
                       </tr>
                     ))}
-                    {/* Spare Total Row */}
-                    <tr className="border-t border-green-400 bg-[#f5f0e8]">
-                      <td colSpan={2} className="px-3 py-2.5 font-bold border-r border-green-400">Spare Total</td>
-                      <td className="px-3 py-2.5 text-center border-r border-green-400 font-bold bg-blue-50">{totalQty.toFixed(2)}</td>
-                      <td className="px-3 py-2.5 border-r border-green-400"></td>
-                      <td className="px-3 py-2.5 text-center font-bold bg-blue-50">{spareTotal.toFixed(2)}</td>
+                  </tbody>
+                  <tfoot>
+                    <tr className="bg-gray-50 border-t-2 border-gray-300">
+                      <td colSpan={4} className="px-3 py-2 text-right font-bold text-[13px]">SPARE TOTAL:</td>
+                      <td className="px-3 py-2 text-center font-bold text-green-700 text-[14px]">₹{spareTotal.toFixed(2)}</td>
                       <td></td>
                     </tr>
-                  </tbody>
+                  </tfoot>
                 </table>
               </div>
 
-              <button
-                onClick={addRow}
-                className="flex items-center gap-1.5 px-3 py-1.5 text-[12px] text-primary border border-primary rounded hover:bg-primary/5 transition-colors mb-4"
-              >
-                <Plus size={13} /> Add Row
-              </button>
-            </div>
-
-            {/* Footer */}
-            <div className="flex items-center justify-center gap-4 px-6 py-4 bg-gray-50 border-t border-border rounded-b-lg">
-              <button
-                onClick={handleSave}
-                className="px-10 py-2.5 bg-[#4a9fb5] text-white rounded font-bold text-[13px] hover:bg-[#3a8fa5] transition-colors"
-              >
-                SAVE
-              </button>
-              <button
-                onClick={() => { setShowForm(false); resetForm(); }}
-                className="px-10 py-2.5 bg-[#c0392b] text-white rounded font-bold text-[13px] hover:bg-[#a93226] transition-colors"
-              >
-                CANCEL
-              </button>
+              <div className="flex items-center justify-between">
+                <button onClick={addRow} className="flex items-center gap-1.5 px-4 py-2 bg-blue-600 text-white rounded text-[12px] font-semibold hover:bg-blue-700 transition-colors">
+                  <Plus size={13} /> Add Row
+                </button>
+                <div className="flex gap-3">
+                  <button onClick={handleSave} className="px-8 py-2.5 bg-green-600 text-white rounded font-bold text-[13px] hover:bg-green-700 transition-all active:scale-95">
+                    SAVE
+                  </button>
+                  <button onClick={() => { setShowForm(false); resetForm(); }} className="px-8 py-2.5 bg-red-500 text-white rounded font-bold text-[13px] hover:bg-red-600 transition-all active:scale-95">
+                    CANCEL
+                  </button>
+                </div>
+              </div>
             </div>
           </div>
         </div>

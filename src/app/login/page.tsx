@@ -3,6 +3,7 @@ import React, { useState } from 'react';
 import { useRouter } from 'next/navigation';
 import { Eye, EyeOff, Loader2, LogIn } from 'lucide-react';
 import { useAuth } from '@/contexts/AuthContext';
+import { createClient } from '@/lib/supabase/client';
 
 export default function LoginPage() {
   const [userId, setUserId] = useState('');
@@ -12,6 +13,7 @@ export default function LoginPage() {
   const [error, setError] = useState('');
   const { signIn } = useAuth();
   const router = useRouter();
+  const supabase = createClient();
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -28,7 +30,25 @@ export default function LoginPage() {
         email = `${email}@indosales.in`;
       }
       await signIn(email, password);
-      router.push('/');
+
+      // Role-based redirect after login
+      try {
+        const { data: roleData } = await supabase
+          .from('user_roles')
+          .select('role')
+          .eq('email', email)
+          .single();
+
+        const role = roleData?.role;
+        if (role === 'technician') {
+          router.push('/technician-dashboard');
+        } else {
+          // admin and user go to main dashboard
+          router.push('/');
+        }
+      } catch {
+        router.push('/');
+      }
       router.refresh();
     } catch {
       setError('Invalid User ID or Password. Please try again.');

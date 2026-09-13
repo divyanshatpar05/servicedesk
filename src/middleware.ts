@@ -21,14 +21,24 @@ export async function middleware(request: NextRequest) {
           cookiesToSet.forEach(({ name, value }) => request.cookies.set(name, value));
           response = NextResponse.next({ request });
           cookiesToSet.forEach(({ name, value, options }) =>
-            response.cookies.set(name, value, options)
+            response.cookies.set(name, value, {
+              ...options,
+              sameSite: 'lax',
+            })
           );
         },
       },
     }
   );
 
-  const { data: { session } } = await supabase.auth.getSession();
+  // Use getSession() instead of getUser() — reads from cookies, no network call
+  let session = null;
+  try {
+    const { data } = await supabase.auth.getSession();
+    session = data.session;
+  } catch {
+    session = null;
+  }
 
   const { pathname } = request.nextUrl;
 
@@ -41,6 +51,25 @@ export async function middleware(request: NextRequest) {
   }
 
   if (session && (pathname === '/login' || pathname === '/sign-up-login-screen')) {
+    // Role-based redirect: fetch role from user_roles table
+    try {
+      const email = session.user?.email;
+      if (email) {
+        const { data: roleData } = await supabase
+          .from('user_roles')
+          .select('role')
+          .eq('email', email)
+          .single();
+
+        const role = roleData?.role;
+        if (role === 'technician') {
+          return NextResponse.redirect(new URL('/technician-dashboard', request.url));
+        }
+      }
+    } catch {
+      // fallback to default redirect
+    }
+    // admin and user roles go to main dashboard
     return NextResponse.redirect(new URL('/', request.url));
   }
 

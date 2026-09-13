@@ -1,13 +1,20 @@
 'use client';
-import React from 'react';
+import React, { useEffect, useState, useCallback } from 'react';
 import { BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, Cell } from 'recharts';
+import { createClient } from '@/lib/supabase/client';
 
-const data = [
-  { name: 'Completed', value: 47, color: '#22c55e' },
-  { name: 'In Progress', value: 23, color: '#3b82f6' },
-  { name: 'Open', value: 18, color: '#f59e0b' },
-  { name: 'Hold', value: 9, color: '#ef4444' },
-];
+interface StatusEntry {
+  name: string;
+  value: number;
+  color: string;
+}
+
+const STATUS_CONFIG: Record<string, { label: string; color: string }> = {
+  COMPLETED: { label: 'Completed', color: '#22c55e' },
+  RUNNING: { label: 'In Progress', color: '#3b82f6' },
+  PENDING: { label: 'Open', color: '#f59e0b' },
+  HOLD: { label: 'Hold', color: '#ef4444' },
+};
 
 const CustomTooltip = ({ active, payload }: { active?: boolean; payload?: { name: string; value: number; payload: { color: string } }[] }) => {
   if (!active || !payload?.[0]) return null;
@@ -20,6 +27,56 @@ const CustomTooltip = ({ active, payload }: { active?: boolean; payload?: { name
 };
 
 export default function JobStatusChart() {
+  const [data, setData] = useState<StatusEntry[]>([
+    { name: 'Completed', value: 0, color: '#22c55e' },
+    { name: 'In Progress', value: 0, color: '#3b82f6' },
+    { name: 'Open', value: 0, color: '#f59e0b' },
+    { name: 'Hold', value: 0, color: '#ef4444' },
+  ]);
+
+  const fetchData = useCallback(async () => {
+    try {
+      const supabase = createClient();
+      const { data: dockets } = await supabase
+        .from('service_dockets')
+        .select('docket_status');
+
+      if (!dockets) return;
+
+      const counts: Record<string, number> = { COMPLETED: 0, RUNNING: 0, PENDING: 0, HOLD: 0 };
+      dockets.forEach((d: { docket_status: string }) => {
+        const s = String(d.docket_status || '').toUpperCase();
+        if (s in counts) counts[s]++;
+      });
+
+      setData(
+        Object.entries(STATUS_CONFIG).map(([key, cfg]) => ({
+          name: cfg.label,
+          value: counts[key] || 0,
+          color: cfg.color,
+        }))
+      );
+    } catch {
+      // keep previous data
+    }
+  }, []);
+
+  useEffect(() => {
+    fetchData();
+
+    const supabase = createClient();
+    const channel = supabase
+      .channel('realtime:job_status_chart:service_dockets')
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'service_dockets' }, () => {
+        fetchData();
+      })
+      .subscribe();
+
+    return () => {
+      supabase.removeChannel(channel);
+    };
+  }, [fetchData]);
+
   return (
     <div>
       <div className="grid grid-cols-4 gap-2 mb-4">
